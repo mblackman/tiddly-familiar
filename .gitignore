@@ -1,0 +1,19 @@
+# Secrets and local config (use config.example.yaml as the template)
+.env
+.env.*
+config.yaml
+
+# Local CA cert — machine-specific, not for public repos
+lab-hole-root.crt
+
+# Runtime browser profiles (Docker volume at /app/profiles)
+profiles/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Local agent/LLM scratchpad — agent-facing docs, notes, indexes (not part of the project)
+.agent/

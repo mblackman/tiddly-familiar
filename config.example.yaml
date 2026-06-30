@@ -1,0 +1,16 @@
+profiles_dir: /app/profiles
+
+notebooks:
+  - name: ops
+    app_url: https://wiki.example.com
+    unlock:
+      # Confirm with: docker compose exec gateway python -m scripts.probe ops
+      password_selector: "input[name=\"password\"]"
+    probe_filter: "[tiddlypwa[]]"
+
+  # Add more notebooks here:
+  # - name: journal
+  #   app_url: https://journal.example.com
+  #   unlock:
+  #     password_selector: "input[type=password]"
+  #   probe_filter: "[tiddlypwa[]]"
