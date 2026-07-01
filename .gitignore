@@ -15,5 +15,9 @@ __pycache__/
 *.pyo
 .venv/
 
+# Build output
+build/
+node_modules/
+
 # Local agent/LLM scratchpad — agent-facing docs, notes, indexes (not part of the project)
 .agent/

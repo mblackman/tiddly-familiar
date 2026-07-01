@@ -1,8 +1,9 @@
 services:
   gateway:
+    image: ghcr.io/mblackman/tiddlypwa-gateway:latest
     build: .
     ports:
-      - "127.0.0.1:8787:8787"
+      - "8787:8787"
     # All secrets/config come straight from .env via env_file (GATEWAY_API_KEY,
     # GEMINI_API_KEY, GEMINI_MODEL, and per-notebook TWPWA_<NAME>_PASSWORD /
     # _TOKEN / _SALT). CONFIG_PATH is baked into the image. We deliberately do
@@ -14,6 +15,51 @@ services:
     volumes:
       - profiles:/app/profiles
     restart: unless-stopped
+    depends_on:
+      - ollama
+    networks:
+      - default
+      - lab-cc
+    labels:
+      caddy: http://gw.lab.cc
+      caddy.reverse_proxy: "{{upstreams 8787}}"
+
+  # Local embedding server for the RAG `ask` path. Gateway reaches it at
+  # http://ollama:11434 (OLLAMA_URL default). Models persist in the ollama volume.
+  # Pulls the embedding model on every startup (no-op once cached in the volume).
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama serve & until ollama list >/dev/null 2>&1; do sleep 2; done; echo Pulling $$EMBED_MODEL; ollama pull $$EMBED_MODEL; wait"]
+    environment:
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+    networks:
+      - default
+
+  tw-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.tw-dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - tw_dev:/wiki
+    restart: unless-stopped
+    networks:
+      - default
+      - lab-cc
+    labels:
+      caddy: http://tw-dev.lab.cc
+      caddy.reverse_proxy: "{{upstreams 8080}}"
+
+networks:
+  lab-cc:
+    external: true
 
 volumes:
   profiles:
+  tw_dev:
+  ollama:

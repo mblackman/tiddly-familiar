@@ -1,0 +1,18 @@
+# Public image — no personal CA cert or config baked in.
+# Users provide config.yaml via volume mount:
+#   docker run -v ./config.yaml:/app/config.yaml ...
+# Keep playwright version aligned with requirements.txt.
+FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/ ./app/
+COPY scripts/ ./scripts/
+COPY config.example.yaml ./config.yaml
+
+ENV CONFIG_PATH=/app/config.yaml
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8787"]
