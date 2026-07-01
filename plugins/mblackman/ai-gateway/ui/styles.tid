@@ -1,0 +1,225 @@
+.ai-gw-panel {
+  padding: 0.5em 0 1em;
+}
+
+.ai-gw-field-group {
+  margin-bottom: 0.8em;
+}
+
+.ai-gw-label {
+  display: block;
+  font-size: 0.75em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: <<colour foreground>>;
+  opacity: 0.5;
+  margin-bottom: 0.3em;
+}
+
+.ai-gw-label-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 1em;
+  opacity: 0.75;
+}
+
+.ai-gw-field-group textarea,
+.ai-gw-field-group input[type="text"],
+.ai-gw-field-group input:not([type]) {
+  width: 100%;
+  box-sizing: border-box;
+  background: <<colour tiddler-background>>;
+  color: <<colour foreground>>;
+  border: 1px solid <<colour tiddler-border>>;
+  border-radius: 3px;
+  padding: 0.45em 0.6em;
+  font-family: inherit;
+  font-size: 0.88em;
+  resize: vertical;
+  transition: border-color 0.15s;
+  display: block;
+}
+
+.ai-gw-field-group textarea:focus,
+.ai-gw-field-group input:focus {
+  outline: none;
+  border-color: <<colour primary>>;
+}
+
+.ai-gw-asking {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.88em;
+  color: <<colour foreground>>;
+  opacity: 0.65;
+  font-style: italic;
+  padding: 0.4em 0;
+}
+
+.ai-gw-btn-ask {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  background: <<colour primary>>;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 0.4em 0.9em;
+  font-size: 0.88em;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.4;
+  margin: 0.3em 0;
+}
+
+.ai-gw-btn-ask:hover {
+  filter: brightness(1.12);
+}
+
+.ai-gw-btn-clear.tc-btn-invisible {
+  font-size: 0.82em;
+  color: <<colour foreground>>;
+  opacity: 0.4;
+  margin-left: 0.25em;
+}
+
+.ai-gw-btn-clear.tc-btn-invisible:hover {
+  opacity: 0.9;
+}
+
+.ai-gw-answer {
+  border-left: 3px solid <<colour primary>>;
+  background: <<colour tiddler-background>>;
+  border-radius: 3px;
+  padding: 0.65em 0.9em;
+  margin: 0.75em 0 0.5em;
+  font-size: 0.9em;
+}
+
+.ai-gw-answer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.45em;
+}
+
+.ai-gw-answer-label {
+  font-size: 0.72em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: <<colour primary>>;
+  opacity: 0.85;
+}
+
+.ai-gw-answer-body p:first-child { margin-top: 0; }
+.ai-gw-answer-body p:last-child { margin-bottom: 0; }
+
+.ai-gw-sources {
+  font-size: 0.88em;
+  margin-bottom: 0.5em;
+}
+
+.ai-gw-sources-toggle.tc-btn-invisible {
+  color: <<colour foreground>>;
+  opacity: 0.5;
+  font-size: 0.9em;
+  padding: 0;
+}
+
+.ai-gw-sources-toggle.tc-btn-invisible:hover {
+  opacity: 0.9;
+}
+
+.ai-gw-sources-list {
+  margin-top: 0.35em;
+  padding-left: 0.5em;
+  border-left: 2px solid <<colour tiddler-border>>;
+}
+
+.ai-gw-icon {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  vertical-align: -0.1em;
+  flex-shrink: 0;
+}
+
+.ai-gw-spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: ai-gw-spin 0.75s linear infinite;
+  flex-shrink: 0;
+  vertical-align: -0.1em;
+}
+
+@keyframes ai-gw-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ai-gw-summary {
+  border-left: 3px solid <<colour primary>>;
+  background: <<colour tiddler-background>>;
+  border-radius: 3px;
+  padding: 0.65em 0.9em;
+  margin-bottom: 1em;
+  font-size: 0.92em;
+}
+
+.ai-gw-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.72em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: <<colour primary>>;
+  opacity: 0.85;
+  margin-bottom: 0.45em;
+}
+
+.ai-gw-summary-clear.tc-btn-invisible {
+  margin-left: auto;
+  font-size: 1.1em;
+  opacity: 0.35;
+  padding: 0 0.1em;
+  color: <<colour foreground>>;
+}
+
+.ai-gw-summary-clear.tc-btn-invisible:hover {
+  opacity: 0.9;
+}
+
+.ai-gw-summarizing {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.9em;
+  font-style: italic;
+  color: <<colour foreground>>;
+  opacity: 0.65;
+  margin-bottom: 1em;
+}
+
+.ai-gw-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+}
+
+.ai-gw-toolbar-busy {
+  opacity: 0.6;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  font-size: inherit;
+}

@@ -1,0 +1,17 @@
+! TiddlyPWA AI Gateway Plugin
+
+Adds an ''Ask AI'' sidebar panel and per-tiddler ''Summarize'' toolbar button powered by the [[TiddlyPWA Gateway|https://github.com/mblackman/tiddlypwa-gateway]] REST API.
+
+!! Configuration
+
+Set the following tiddlers to point at your gateway instance:
+
+|!Tiddler |!Purpose |!Default |
+|`$:/config/mblackman/ai-gateway/GatewayURL` |Gateway base URL |`http://localhost:8787` |
+|`$:/config/mblackman/ai-gateway/APIKey` |`GATEWAY_API_KEY` from your `.env` |(empty) |
+|`$:/config/mblackman/ai-gateway/Notebook` |Notebook to query |`default` |
+
+!! Features
+
+* ''Ask AI'' — sidebar panel with a question field and optional TiddlyWiki filter; renders the answer with a collapsible source list.
+* ''Summarize'' — toolbar button on any tiddler; calls the gateway with the tiddler as context and writes the result to a `summary` field, displayed above the body.

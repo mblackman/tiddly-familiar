@@ -1,0 +1,14 @@
+{
+    "title": "$:/plugins/mblackman/ai-gateway",
+    "name": "ai-gateway",
+    "description": "Ask AI and Summarize features powered by the TiddlyPWA Gateway REST API.",
+    "author": "mblackman",
+    "version": "0.1.0",
+    "core-version": ">=5.3.0",
+    "source": "https://github.com/mblackman/tiddlypwa-gateway",
+    "documentation": "$:/plugins/mblackman/ai-gateway/Readme",
+    "plugin-type": "plugin",
+    "list": "Readme",
+    "stability": "STABILITY_1_EXPERIMENTAL",
+    "type": "application/json"
+}

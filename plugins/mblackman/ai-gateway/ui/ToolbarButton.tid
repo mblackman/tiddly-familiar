@@ -1,0 +1,9 @@
+<$reveal state="$:/state/ai-gateway/summarizing" type="match" text=<<currentTiddler>>>
+<span class="ai-gw-toolbar-busy" title="Summarizing…"><span class="ai-gw-spinner"></span></span>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/summarizing" type="nomatch" text=<<currentTiddler>>>
+<$button class="tc-btn-invisible ai-gw-toolbar-btn" tooltip="Summarize this note with AI">
+<$action-sendmessage $message="tm-summarize-tiddler" $param=<<currentTiddler>>/>
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>
+</$button>
+</$reveal>

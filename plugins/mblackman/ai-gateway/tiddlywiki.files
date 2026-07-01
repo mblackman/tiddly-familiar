@@ -1,0 +1,76 @@
+{
+    "tiddlers": [
+        {
+            "file": "src/startup.js",
+            "fields": {
+                "type": "application/javascript",
+                "title": "$:/plugins/mblackman/ai-gateway/startup.js",
+                "module-type": "startup"
+            }
+        },
+        {
+            "file": "Readme.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/plugins/mblackman/ai-gateway/Readme",
+                "caption": "Readme"
+            }
+        },
+        {
+            "file": "ui/SidebarPanel.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/plugins/mblackman/ai-gateway/ui/SidebarPanel",
+                "caption": "Ask AI",
+                "tags": "$:/tags/SideBar"
+            }
+        },
+        {
+            "file": "ui/ToolbarButton.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/plugins/mblackman/ai-gateway/ui/ToolbarButton",
+                "caption": "Summarize",
+                "tags": "$:/tags/ViewToolbar"
+            }
+        },
+        {
+            "file": "ui/ViewTemplate.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/plugins/mblackman/ai-gateway/ui/ViewTemplate",
+                "tags": "$:/tags/ViewTemplate",
+                "list-before": "$:/core/ui/ViewTemplate/body"
+            }
+        },
+        {
+            "file": "ui/styles.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/plugins/mblackman/ai-gateway/ui/styles",
+                "tags": "$:/tags/Stylesheet"
+            }
+        },
+        {
+            "file": "config/GatewayURL.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/ai-gateway/GatewayURL"
+            }
+        },
+        {
+            "file": "config/APIKey.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/ai-gateway/APIKey"
+            }
+        },
+        {
+            "file": "config/Notebook.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/ai-gateway/Notebook"
+            }
+        }
+    ]
+}

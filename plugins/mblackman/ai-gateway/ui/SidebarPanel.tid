@@ -1,0 +1,51 @@
+\define ai-gw-clear-state()
+<$action-setfield $tiddler="$:/state/ai-gateway/answer" text=""/>
+<$action-setfield $tiddler="$:/state/ai-gateway/sources" text=""/>
+<$action-setfield $tiddler="$:/state/ai-gateway/sources-open" text="no"/>
+\end
+
+<div class="ai-gw-panel">
+
+<div class="ai-gw-field-group">
+<span class="ai-gw-label">Question</span>
+<$edit-text tiddler="$:/state/ai-gateway/question" tag="textarea" placeholder="Ask anything about your notes…" rows="4"/>
+</div>
+
+<div class="ai-gw-field-group">
+<span class="ai-gw-label">Filter <span class="ai-gw-label-hint">(optional)</span></span>
+<$edit-text tiddler="$:/state/ai-gateway/filter" tag="input" placeholder="[!is[system]]"/>
+</div>
+
+<$reveal state="$:/state/ai-gateway/asking" type="match" text="yes">
+<span class="ai-gw-asking"><span class="ai-gw-spinner"></span> Thinking…</span>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/asking" type="nomatch" text="yes">
+<$button class="ai-gw-btn-ask" tooltip="Ask AI about your notes">
+<$action-sendmessage $message="tm-ask-ai"/>
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Ask
+</$button>
+</$reveal>
+
+<$reveal state="$:/state/ai-gateway/answer" type="nomatch" text="">
+<div class="ai-gw-answer">
+<div class="ai-gw-answer-head">
+<span class="ai-gw-answer-label">Answer</span>
+<$button class="tc-btn-invisible ai-gw-btn-clear" tooltip="Clear"><<ai-gw-clear-state>>×</$button>
+</div>
+<div class="ai-gw-answer-body">{{$:/state/ai-gateway/answer}}</div>
+</div>
+
+<$reveal state="$:/state/ai-gateway/sources" type="nomatch" text="">
+<div class="ai-gw-sources">
+<$button class="tc-btn-invisible ai-gw-sources-toggle">
+<$action-setfield $tiddler="$:/state/ai-gateway/sources-open" text={{{ [{$:/state/ai-gateway/sources-open}match[yes]then[no]else[yes]] }}}/>
+<$reveal state="$:/state/ai-gateway/sources-open" type="match" text="yes">▾ Sources</$reveal><$reveal state="$:/state/ai-gateway/sources-open" type="nomatch" text="yes">▸ Sources</$reveal>
+</$button>
+<$reveal state="$:/state/ai-gateway/sources-open" type="match" text="yes">
+<div class="ai-gw-sources-list">{{$:/state/ai-gateway/sources}}</div>
+</$reveal>
+</div>
+</$reveal>
+</$reveal>
+
+</div>

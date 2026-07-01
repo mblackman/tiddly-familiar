@@ -1,0 +1,13 @@
+<$reveal state="$:/state/ai-gateway/summarizing" type="match" text=<<currentTiddler>>>
+<div class="ai-gw-summarizing"><span class="ai-gw-spinner"></span> Summarizing…</div>
+</$reveal>
+
+<$list filter="[<currentTiddler>!has[draft.of]has[summary]]" variable="ignore">
+<div class="ai-gw-summary">
+<div class="ai-gw-summary-head">
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>AI Summary
+<$button class="tc-btn-invisible ai-gw-summary-clear" tooltip="Clear summary"><$action-deletefield $field="summary"/>×</$button>
+</div>
+<$transclude field="summary" mode="block"/>
+</div>
+</$list>
