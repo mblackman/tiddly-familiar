@@ -34,6 +34,7 @@ async def _generate(question: str, tiddlers: list[dict], api_key: str, model: st
             system_instruction=(
                 "You are answering questions about a personal TiddlyWiki notebook. "
                 "Use only the provided notes to answer. "
+                "Format the answer in Markdown. "
                 "When you reference a specific note, cite it inline using TiddlyWiki link "
                 "syntax: [[Note Title]] — use the exact title as given in the notes. "
                 "If the notes don't contain enough information, say so."

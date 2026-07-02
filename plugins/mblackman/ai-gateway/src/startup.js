@@ -31,8 +31,10 @@ exports.startup = function() {
       return h;
     }
 
-    function setState(title, text) {
-      $tw.wiki.addTiddler(new $tw.Tiddler({title: title, text: text}));
+    function setState(title, text, type) {
+      var fields = {title: title, text: text};
+      if (type) fields.type = type;
+      $tw.wiki.addTiddler(new $tw.Tiddler(fields));
     }
 
     $tw.TiddlyPWAGateway = {
@@ -99,7 +101,7 @@ exports.startup = function() {
       setState("$:/state/ai-gateway/sources", "");
       $tw.TiddlyPWAGateway.ask(question, filter || null).then(function(data) {
         dbg("ask ok; answer length=" + ((data.answer||"").length) + " sources=" + ((data.sources||[]).length));
-        setState("$:/state/ai-gateway/answer",  data.answer || "(no answer)");
+        setState("$:/state/ai-gateway/answer",  data.answer || "(no answer)", "text/markdown");
         var sources = (data.sources || []).map(function(s) { return "* [[" + s + "]]"; }).join("\n");
         setState("$:/state/ai-gateway/sources", sources);
         setState("$:/state/ai-gateway/asking",  "no");
