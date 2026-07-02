@@ -20,6 +20,15 @@ logger = logging.getLogger(__name__)
 # a coarse char budget (v1 — per-tiddler chunking is a future enhancement).
 _MAX_EMBED_CHARS = 8000
 
+# Cache misses are embedded in chunks of this size so each chunk lands in the
+# cache as it completes — a timeout/crash mid-corpus keeps the progress made,
+# and no single request approaches the client timeout.
+_EMBED_BATCH_SIZE = 32
+
+
+class EmbeddingError(RuntimeError):
+    """Embedding backend failure, with a message safe to show to the caller."""
+
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -61,14 +70,34 @@ class Embedder:
         await self._client.aclose()
 
     async def _embed_raw(self, texts: list[str]) -> list[list[float]]:
-        """Call Ollama for a batch of texts. No caching/truncation here."""
+        """Call Ollama for a batch of texts. No caching/truncation here.
+        Transport/status failures surface as EmbeddingError so callers can
+        distinguish embedding problems from generation-model problems."""
         if not texts:
             return []
-        resp = await self._client.post(
-            f"{self._url}/api/embed",
-            json={"model": self._model, "input": texts},
-        )
-        resp.raise_for_status()
+        try:
+            resp = await self._client.post(
+                f"{self._url}/api/embed",
+                json={"model": self._model, "input": texts},
+            )
+            resp.raise_for_status()
+        except httpx.ConnectError as e:
+            raise EmbeddingError(
+                "Cannot reach the embedding service — Ollama may still be starting up."
+            ) from e
+        except httpx.TimeoutException as e:
+            raise EmbeddingError(
+                "The embedding service timed out — it may be busy. Please try again."
+            ) from e
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                raise EmbeddingError(
+                    "Embedding model not ready — it may still be downloading. "
+                    "Please wait and try again."
+                ) from e
+            raise EmbeddingError(
+                f"Embedding service returned {e.response.status_code}."
+            ) from e
         data = resp.json()
         embeddings = data.get("embeddings")
         if embeddings is None or len(embeddings) != len(texts):
@@ -102,9 +131,12 @@ class Embedder:
             skipped = len(missing_idx) - max_new
             missing_idx = missing_idx[:max_new]
         if missing_idx:
-            fresh = await self._embed_raw([truncated[i] for i in missing_idx])
-            for i, vec in zip(missing_idx, fresh):
-                self._cache[keys[i]] = vec
+            # Chunked so each completed chunk is cached even if a later one fails.
+            for start in range(0, len(missing_idx), _EMBED_BATCH_SIZE):
+                chunk = missing_idx[start : start + _EMBED_BATCH_SIZE]
+                fresh = await self._embed_raw([truncated[i] for i in chunk])
+                for i, vec in zip(chunk, fresh):
+                    self._cache[keys[i]] = vec
             logger.info(
                 "Embedder: %d cache hit(s), %d embedded, %d skipped (model=%s)",
                 len(texts) - len(missing_idx) - skipped,

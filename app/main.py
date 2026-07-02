@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from .ai import answer_question
 from .config import AppConfig, load_config
-from .embeddings import Embedder
+from .embeddings import Embedder, EmbeddingError
 from .manager import AppManager
 from .mcp_server import init as mcp_init
 from .mcp_server import mcp
@@ -219,14 +219,12 @@ async def ask(nb: str, body: AskBody):
             model=_config.gemini_model,
             max_embed=body.max_tiddlers,
         )
-    except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Cannot reach the embedding service — Ollama may still be starting up.")
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=503, detail="Upstream request timed out — the embedding batch may be large. Please try again.")
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            raise HTTPException(status_code=503, detail="Embedding model not ready — it may still be downloading. Please wait and try again.")
-        raise HTTPException(status_code=503, detail=f"Embedding service returned {e.response.status_code}.")
+    except EmbeddingError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except (httpx.ConnectError, httpx.TimeoutException):
+        # Embedder httpx errors are wrapped in EmbeddingError, so anything
+        # reaching here came from the Gemini client's transport.
+        raise HTTPException(status_code=503, detail="Cannot reach the AI model service — network issue toward Gemini. Please try again.")
     except genai_errors.ServerError:
         raise HTTPException(status_code=503, detail="The AI model is busy right now. Please try again in a moment.")
     except genai_errors.ClientError as e:

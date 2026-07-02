@@ -5,7 +5,10 @@ or Playwright needed — the Ollama call is stubbed. Run: pytest tests/test_smok
 
 import asyncio
 
-from app.embeddings import Embedder, rank
+import pytest
+
+from app.ai import _extract_citations
+from app.embeddings import _EMBED_BATCH_SIZE, Embedder, rank
 
 
 def test_rank_orders_by_cosine():
@@ -102,3 +105,60 @@ def test_embed_documents_max_new_ignores_cache_hits():
     vecs = asyncio.run(run())
     assert all(v is not None for v in vecs)
     assert calls[1] == ["gamma"]
+
+
+def test_embed_documents_chunks_large_batches():
+    """Misses are sent in _EMBED_BATCH_SIZE chunks, not one giant POST."""
+    emb, calls = _stub_embedder()
+    docs = [f"doc-{i}" for i in range(_EMBED_BATCH_SIZE + 3)]
+
+    vecs = asyncio.run(emb.embed_documents(docs))
+    assert all(v is not None for v in vecs)
+    assert [len(c) for c in calls] == [_EMBED_BATCH_SIZE, 3]
+
+
+def test_embed_documents_keeps_progress_on_failure():
+    """A failure mid-corpus keeps already-embedded chunks cached, so the retry
+    only re-sends what's still missing."""
+    emb, calls = _stub_embedder()
+    docs = [f"doc-{i}" for i in range(_EMBED_BATCH_SIZE + 3)]
+    original_raw = emb._embed_raw
+    attempts = 0
+
+    async def flaky_raw(texts):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 2:  # second chunk of the first pass blows up
+            raise RuntimeError("ollama fell over")
+        return await original_raw(texts)
+
+    emb._embed_raw = flaky_raw  # type: ignore[assignment]
+
+    async def run():
+        with pytest.raises(RuntimeError):
+            await emb.embed_documents(docs)
+        return await emb.embed_documents(docs)
+
+    vecs = asyncio.run(run())
+    assert all(v is not None for v in vecs)
+    # First attempt cached its first chunk; the retry only sent the leftovers.
+    assert [len(c) for c in calls] == [_EMBED_BATCH_SIZE, 3]
+
+
+def test_extract_citations_plain_and_aliased():
+    titles = {"Meeting 2026-06-12", "Project Plan"}
+    answer = (
+        "See [[Project Plan]] and [[the meeting notes|Meeting 2026-06-12]] "
+        "for details."
+    )
+    assert _extract_citations(answer, titles) == [
+        "Project Plan",
+        "Meeting 2026-06-12",
+    ]
+
+
+def test_extract_citations_filters_and_dedupes():
+    titles = {"Real Note"}
+    answer = "[[Real Note]] then [[Made Up Note]] then [[again|Real Note]]"
+    # Hallucinated titles are dropped; repeat citations collapse, keeping order.
+    assert _extract_citations(answer, titles) == ["Real Note"]

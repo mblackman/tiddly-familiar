@@ -44,13 +44,18 @@ async def _generate(question: str, tiddlers: list[dict], api_key: str, model: st
     # response.text is Optional — None when the response has no text parts
     # (e.g. blocked by safety filters or an empty candidate).
     answer = response.text or "The AI model returned no answer for this question."
-    # Build sources from [[...]] patterns actually present in the answer,
-    # filtered to titles that were in the context (avoids hallucinated links).
-    cited = list(dict.fromkeys(
-        m for m in re.findall(r'\[\[([^\]]+)\]\]', answer)
-        if m in title_set
-    ))
-    return {"answer": answer, "sources": cited}
+    return {"answer": answer, "sources": _extract_citations(answer, title_set)}
+
+
+def _extract_citations(answer: str, title_set: set[str]) -> list[str]:
+    """Titles cited as [[Title]] or [[display text|Title]] in the answer,
+    filtered to titles that were in the context (avoids hallucinated links),
+    deduped in first-citation order. TiddlyWiki link targets are everything
+    after the first pipe."""
+    targets = (
+        m.split("|", 1)[-1] for m in re.findall(r"\[\[([^\]]+)\]\]", answer)
+    )
+    return list(dict.fromkeys(t for t in targets if t in title_set))
 
 
 def _tiddler_text(t: dict) -> str:
