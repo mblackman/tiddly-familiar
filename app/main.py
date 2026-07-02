@@ -1,19 +1,18 @@
+import os
 import secrets
 from contextlib import asynccontextmanager
 from typing import Optional
 from urllib.parse import parse_qs
 
-import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
-from google.genai import errors as genai_errors
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
-from .ai import answer_question
+from . import service
 from .config import AppConfig, load_config
-from .embeddings import Embedder, EmbeddingError
+from .embeddings import Embedder
 from .manager import AppManager
 from .mcp_server import init as mcp_init
 from .mcp_server import mcp
@@ -29,7 +28,12 @@ async def lifespan(app: FastAPI):
     _config = load_config()
     _manager = AppManager()
     await _manager.start(_config.notebooks, _config.profiles_dir)
-    _embedder = Embedder(_config.ollama_url, _config.embed_model)
+    # Cache lives on the profiles named volume so restarts don't re-embed.
+    _embedder = Embedder(
+        _config.ollama_url,
+        _config.embed_model,
+        cache_path=os.path.join(_config.profiles_dir, "embeddings.sqlite3"),
+    )
     mcp_init(_config, _manager, _embedder)
     yield
     await _embedder.aclose()
@@ -204,31 +208,18 @@ async def sync(nb: str):
 
 @app.post("/notebooks/{nb}/ask", dependencies=[Depends(require_auth)])
 async def ask(nb: str, body: AskBody):
-    if not _config.gemini_api_key:
-        raise HTTPException(status_code=503, detail="GEMINI_API_KEY not configured")
     nbm = _get_notebook(nb)
-    filter_str = body.filter or "[!is[system]]"
-    tiddlers = await nbm.filter_tiddlers(filter_str, full=True)
     try:
-        return await answer_question(
-            question=body.question,
-            tiddlers=tiddlers,
+        return await service.ask(
+            nbm,
+            body.question,
+            config=_config,
             embedder=_embedder,
-            top_k=_config.rag_top_k,
-            api_key=_config.gemini_api_key,
-            model=_config.gemini_model,
-            max_embed=body.max_tiddlers,
+            filter=body.filter,
+            max_tiddlers=body.max_tiddlers,
         )
-    except EmbeddingError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-    except (httpx.ConnectError, httpx.TimeoutException):
-        # Embedder httpx errors are wrapped in EmbeddingError, so anything
-        # reaching here came from the Gemini client's transport.
-        raise HTTPException(status_code=503, detail="Cannot reach the AI model service — network issue toward Gemini. Please try again.")
-    except genai_errors.ServerError:
-        raise HTTPException(status_code=503, detail="The AI model is busy right now. Please try again in a moment.")
-    except genai_errors.ClientError as e:
-        raise HTTPException(status_code=502, detail=f"AI model error: {e.message}")
+    except service.AskError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
     except Exception as e:
         # Re-raise as HTTPException so it flows through CORSMiddleware —
         # unhandled exceptions bypass it and the browser sees a CORS error.

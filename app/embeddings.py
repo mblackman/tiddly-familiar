@@ -9,6 +9,8 @@ tiddlers reach the generation model.
 
 import hashlib
 import logging
+import os
+import sqlite3
 
 import httpx
 import numpy as np
@@ -53,21 +55,64 @@ def rank(query_vec: list[float], candidate_vecs: list[list[float]]) -> list[tupl
 
 
 class Embedder:
-    """Ollama-backed embedder with a process-lifetime content-hash cache.
+    """Ollama-backed embedder with a content-hash vector cache.
 
     The cache is keyed by the text hash alone (not title), so identical text under
     different titles reuses one vector and a retitled-but-unchanged tiddler stays
     cached. Editing a tiddler's text changes its hash and transparently re-embeds.
+
+    With `cache_path` set, vectors also persist to a SQLite file (keyed by
+    model + hash, so switching embed models never serves stale vectors) and are
+    loaded back on startup — a container restart doesn't re-embed the corpus.
+    Content-hash keying means no invalidation logic is needed.
     """
 
-    def __init__(self, ollama_url: str, model: str):
+    def __init__(self, ollama_url: str, model: str, cache_path: str | None = None):
         self._url = ollama_url.rstrip("/")
         self._model = model
         self._cache: dict[str, list[float]] = {}
         self._client = httpx.AsyncClient(timeout=60.0)
+        self._db: sqlite3.Connection | None = None
+        if cache_path:
+            parent = os.path.dirname(cache_path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            self._db = sqlite3.connect(cache_path)
+            self._db.execute(
+                "CREATE TABLE IF NOT EXISTS embeddings ("
+                " model TEXT NOT NULL, hash TEXT NOT NULL, vec BLOB NOT NULL,"
+                " PRIMARY KEY (model, hash))"
+            )
+            self._db.commit()
+            rows = self._db.execute(
+                "SELECT hash, vec FROM embeddings WHERE model = ?", (model,)
+            )
+            self._cache = {
+                h: np.frombuffer(blob, dtype=np.float32).tolist() for h, blob in rows
+            }
+            if self._cache:
+                logger.info(
+                    "Embedder: loaded %d cached vector(s) from %s (model=%s)",
+                    len(self._cache), cache_path, model,
+                )
 
     async def aclose(self):
         await self._client.aclose()
+        if self._db is not None:
+            self._db.close()
+
+    def _persist(self, items: list[tuple[str, list[float]]]) -> None:
+        """Write freshly embedded (hash, vector) pairs through to disk."""
+        if self._db is None:
+            return
+        self._db.executemany(
+            "INSERT OR REPLACE INTO embeddings (model, hash, vec) VALUES (?, ?, ?)",
+            [
+                (self._model, key, np.asarray(vec, dtype=np.float32).tobytes())
+                for key, vec in items
+            ],
+        )
+        self._db.commit()
 
     async def _embed_raw(self, texts: list[str]) -> list[list[float]]:
         """Call Ollama for a batch of texts. No caching/truncation here.
@@ -137,6 +182,9 @@ class Embedder:
                 fresh = await self._embed_raw([truncated[i] for i in chunk])
                 for i, vec in zip(chunk, fresh):
                     self._cache[keys[i]] = vec
+                # Per-chunk write-through: progress survives a mid-corpus failure
+                # and a restart.
+                self._persist([(keys[i], vec) for i, vec in zip(chunk, fresh)])
             logger.info(
                 "Embedder: %d cache hit(s), %d embedded, %d skipped (model=%s)",
                 len(texts) - len(missing_idx) - skipped,

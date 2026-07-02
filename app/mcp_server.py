@@ -8,7 +8,7 @@ claude.ai as a remote MCP server pointing at http(s)://<host>:8787/mcp.
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import TransportSecuritySettings
 
-from .ai import answer_question
+from . import service
 
 # Module-level globals set during FastAPI lifespan (see main.py)
 _config = None
@@ -144,18 +144,14 @@ async def ask_notebook(
       [tag[project]]      — only project notes
       [search[meeting]]   — only notes matching 'meeting'
     """
-    if _config is None or not _config.gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY not configured")
     nbm = _nb(notebook)
-    tiddlers = await nbm.filter_tiddlers(filter, full=True)
-    return await answer_question(
-        question=question,
-        tiddlers=tiddlers,
+    # service.AskError is a RuntimeError with a user-facing message; FastMCP
+    # surfaces it to the client as the tool error text.
+    return await service.ask(
+        nbm,
+        question,
+        config=_config,
         embedder=_embedder,
-        top_k=_config.rag_top_k,
-        api_key=_config.gemini_api_key,
-        model=_config.gemini_model,
-        # Clamp: MCP args aren't range-validated like the REST body (ge=1), and
-        # max_new <= 0 would skip every uncached tiddler forever.
-        max_embed=max(1, max_tiddlers),
+        filter=filter,
+        max_tiddlers=max_tiddlers,
     )
