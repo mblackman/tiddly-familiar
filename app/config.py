@@ -27,6 +27,12 @@ class AppConfig:
     gemini_model: str
     notebooks: dict  # name -> NotebookConfig
     profiles_dir: str = "/app/profiles"
+    # RAG retrieval (local Ollama embeddings). max_tiddlers (per-request) caps the
+    # candidate set that gets embedded/ranked; rag_top_k caps how many survive into
+    # the Gemini prompt.
+    ollama_url: str = "http://ollama:11434"
+    embed_model: str = "nomic-embed-text"
+    rag_top_k: int = 8
 
 
 def load_config() -> AppConfig:
@@ -57,7 +63,10 @@ def load_config() -> AppConfig:
     return AppConfig(
         api_key=os.environ["GATEWAY_API_KEY"],
         gemini_api_key=os.environ.get("GEMINI_API_KEY", ""),
-        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.0-flash-lite"),
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite"),
         notebooks=notebooks,
         profiles_dir=data.get("profiles_dir", "/app/profiles"),
+        ollama_url=os.environ.get("OLLAMA_URL", "http://ollama:11434"),
+        embed_model=os.environ.get("EMBED_MODEL", "nomic-embed-text"),
+        rag_top_k=int(os.environ.get("RAG_TOP_K", "8")),
     )

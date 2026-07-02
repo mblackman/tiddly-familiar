@@ -6,20 +6,31 @@ claude.ai as a remote MCP server pointing at http(s)://<host>:8787/mcp.
 """
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import TransportSecuritySettings
 
-from .ai import ask_gemini
+from .ai import answer_question
 
 # Module-level globals set during FastAPI lifespan (see main.py)
 _config = None
 _manager = None
+_embedder = None
 
-mcp = FastMCP("TiddlyPWA Gateway")
+# DNS rebinding protection is disabled: the gateway runs on an isolated Docker
+# network and is not exposed to the internet, so the Host header check would
+# only block legitimate clients (Claude Code via claude-docker hostname).
+mcp = FastMCP(
+    "TiddlyPWA Gateway",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,
+    ),
+)
 
 
-def init(config, manager) -> None:
-    global _config, _manager
+def init(config, manager, embedder) -> None:
+    global _config, _manager, _embedder
     _config = config
     _manager = manager
+    _embedder = embedder
 
 
 def _nb(notebook: str):
@@ -118,12 +129,18 @@ async def ask_notebook(
     max_tiddlers: int = 100,
 ) -> dict:
     """
-    Answer a natural-language question about a notebook using Gemini.
+    Answer a natural-language question about a notebook.
 
-    Fetches tiddlers matching 'filter', passes them as context to Gemini,
-    and returns the answer plus the list of source tiddler titles used.
+    Ranks every tiddler matching 'filter' by semantic similarity to the question
+    using local embeddings, and passes only the most relevant top-k to Gemini.
+    Returns {answer, sources, truncated} where 'sources' is the ranked set of
+    tiddler titles actually used. max_tiddlers bounds how many *not-yet-cached*
+    tiddlers get embedded per request (cost control); 'truncated' is true if
+    some candidates were skipped because of it — repeating the question makes
+    progress until the cache covers everything.
 
-    Use a narrower filter to stay within context limits, e.g.:
+    'filter' pre-narrows the candidate pool; ranking handles final relevance, so
+    a broad filter is fine, e.g.:
       [tag[project]]      — only project notes
       [search[meeting]]   — only notes matching 'meeting'
     """
@@ -131,10 +148,14 @@ async def ask_notebook(
         raise RuntimeError("GEMINI_API_KEY not configured")
     nbm = _nb(notebook)
     tiddlers = await nbm.filter_tiddlers(filter, full=True)
-    tiddlers = tiddlers[:max_tiddlers]
-    return await ask_gemini(
+    return await answer_question(
         question=question,
         tiddlers=tiddlers,
+        embedder=_embedder,
+        top_k=_config.rag_top_k,
         api_key=_config.gemini_api_key,
         model=_config.gemini_model,
+        # Clamp: MCP args aren't range-validated like the REST body (ge=1), and
+        # max_new <= 0 would skip every uncached tiddler forever.
+        max_embed=max(1, max_tiddlers),
     )

@@ -1,0 +1,6 @@
+FROM node:22-alpine
+RUN npm install -g tiddlywiki
+EXPOSE 8080
+# Initialize the wiki on first run (when the volume is empty), then serve.
+CMD sh -c "test -f /wiki/tiddlywiki.info || tiddlywiki /wiki --init server && \
+           tiddlywiki /wiki --listen host=0.0.0.0 port=8080"

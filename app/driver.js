@@ -32,7 +32,15 @@
     },
 
     putTiddler(title, fields, text) {
-      $tw.wiki.addTiddler(new $tw.Tiddler(Object.assign({}, fields, { title, text })));
+      // Later arguments win: creation fields are overridden by an existing
+      // tiddler's `created`, and `modified` is stamped fresh on every write.
+      $tw.wiki.addTiddler(new $tw.Tiddler(
+        $tw.wiki.getCreationFields(),
+        $tw.wiki.getTiddler(title),
+        fields,
+        { title, text },
+        $tw.wiki.getModificationFields()
+      ));
       return true;
     },
 

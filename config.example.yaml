@@ -1,3 +1,12 @@
+# profiles_dir and notebooks live here; all secrets + tunables come from .env:
+#   GATEWAY_API_KEY           — required; guards every endpoint
+#   GEMINI_API_KEY            — required for the `ask` path (answer generation)
+#   GEMINI_MODEL              — default gemini-2.5-flash-lite
+#   TWPWA_<NAME>_TOKEN/_PASSWORD — per-notebook login credentials
+# RAG retrieval (local Ollama embeddings) tunables — all optional:
+#   OLLAMA_URL                — default http://ollama:11434 (compose service)
+#   EMBED_MODEL               — default nomic-embed-text
+#   RAG_TOP_K                 — default 8 (tiddlers passed to Gemini after ranking)
 profiles_dir: /app/profiles
 
 notebooks:

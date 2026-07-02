@@ -10,22 +10,71 @@ logger = logging.getLogger(__name__)
 
 DRIVER_JS = (Path(__file__).parent / "driver.js").read_text()
 
+# Substrings Playwright uses when the page/context/browser has gone away. Matching
+# on message keeps us decoupled from Playwright's exact exception classes across
+# versions (TargetClosedError, Error, etc.).
+_PAGE_CLOSED_MARKERS = (
+    "target page, context or browser has been closed",
+    "target closed",
+    "execution context was destroyed",
+    "page has been closed",
+    "browser has been closed",
+    "has been closed",
+)
+
+
+def _is_page_closed_error(exc: Exception) -> bool:
+    return any(m in str(exc).lower() for m in _PAGE_CLOSED_MARKERS)
+
 
 class NotebookManager:
     def __init__(self, config: NotebookConfig, context: BrowserContext):
         self.config = config
         self._context = context
         self._page: Page | None = None
+        # _lock serializes (re)initialization; _op_lock serializes the actual
+        # page operations. They must be distinct: operations call ensure_ready(),
+        # so sharing one lock would deadlock.
         self._lock = asyncio.Lock()
+        self._op_lock = asyncio.Lock()
         self._ready = False
 
     async def ensure_ready(self):
+        # A closed page can't serve anything — force a re-unlock rather than
+        # short-circuiting on a stale _ready flag.
+        if self._ready and self._page is not None and self._page.is_closed():
+            self._ready = False
         if self._ready:
             return
         async with self._lock:
+            if self._ready and self._page is not None and self._page.is_closed():
+                self._ready = False
             if self._ready:
                 return
             await self._unlock()
+
+    async def _eval(self, js: str, arg=None):
+        """Run a page.evaluate under the op-lock, transparently reconnecting once if
+        the page/session died underneath us."""
+        await self.ensure_ready()
+        async with self._op_lock:
+            try:
+                if arg is None:
+                    return await self._page.evaluate(js)
+                return await self._page.evaluate(js, arg)
+            except Exception as e:
+                if not _is_page_closed_error(e):
+                    raise
+                logger.warning(
+                    "Notebook '%s': page died mid-op, reconnecting", self.config.name
+                )
+                self._ready = False
+        # Re-init outside the op-lock (ensure_ready takes _lock), then retry once.
+        await self.ensure_ready()
+        async with self._op_lock:
+            if arg is None:
+                return await self._page.evaluate(js)
+            return await self._page.evaluate(js, arg)
 
     async def _unlock(self):
         logger.info("Notebook '%s': opening page at %s", self.config.name, self.config.app_url)
@@ -131,42 +180,31 @@ class NotebookManager:
         logger.warning("Notebook '%s': tiddlypwa-remember did not confirm within 10s", self.config.name)
 
     async def filter_tiddlers(self, filter_str: str, full: bool = False) -> list:
-        await self.ensure_ready()
         if full:
-            return await self._page.evaluate(
-                "(f) => window.__gw.filterFull(f)", filter_str
-            )
-        return await self._page.evaluate("(f) => window.__gw.filter(f)", filter_str)
+            return await self._eval("(f) => window.__gw.filterFull(f)", filter_str)
+        return await self._eval("(f) => window.__gw.filter(f)", filter_str)
 
     async def get_tiddler(self, title: str) -> dict | None:
-        await self.ensure_ready()
-        return await self._page.evaluate("(t) => window.__gw.getTiddler(t)", title)
+        return await self._eval("(t) => window.__gw.getTiddler(t)", title)
 
     async def put_tiddler(self, title: str, fields: dict, text: str) -> bool:
-        await self.ensure_ready()
-        return await self._page.evaluate(
+        return await self._eval(
             "([t, f, x]) => window.__gw.putTiddler(t, f, x)", [title, fields, text]
         )
 
     async def delete_tiddler(self, title: str) -> bool:
-        await self.ensure_ready()
-        return await self._page.evaluate("(t) => window.__gw.deleteTiddler(t)", title)
+        return await self._eval("(t) => window.__gw.deleteTiddler(t)", title)
 
     async def render(self, title: str, mode: str = "plain") -> str:
-        await self.ensure_ready()
-        return await self._page.evaluate(
-            "([t, m]) => window.__gw.render(t, m)", [title, mode]
-        )
+        return await self._eval("([t, m]) => window.__gw.render(t, m)", [title, mode])
 
     async def render_text(self, text: str, mode: str = "plain") -> str:
-        await self.ensure_ready()
-        return await self._page.evaluate(
+        return await self._eval(
             "([x, m]) => window.__gw.renderText(x, m)", [text, mode]
         )
 
     async def sync(self) -> bool:
-        await self.ensure_ready()
-        return await self._page.evaluate("() => window.__gw.sync()")
+        return await self._eval("() => window.__gw.sync()")
 
     async def probe(self) -> dict:
         if self._ready and self._page:
@@ -204,12 +242,12 @@ class AppManager:
             profile_dir = profiles / name
             profile_dir.mkdir(parents=True, exist_ok=True)
             # launch_persistent_context owns the browser process — no separate
-            # Browser handle needed. ignore_https_errors is belt-and-suspenders
-            # alongside the NSS cert store set up in the Dockerfile.
+            # Browser handle needed. TLS for *.lab.hole is verified against the
+            # Hole Lab root CA in the NSS store (set up in the Dockerfile);
+            # ignoring HTTPS errors here would defeat that pinning.
             context = await self._playwright.chromium.launch_persistent_context(
                 str(profile_dir),
                 headless=True,
-                ignore_https_errors=True,
             )
             self._notebooks[name] = NotebookManager(cfg, context)
 
