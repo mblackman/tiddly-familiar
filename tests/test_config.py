@@ -25,7 +25,8 @@ def config_env(tmp_path, monkeypatch):
     # Make sure ambient env from the dev box doesn't leak into assertions.
     for var in (
         "GEMINI_API_KEY", "GEMINI_MODEL", "OLLAMA_URL", "EMBED_MODEL",
-        "RAG_TOP_K", "TWPWA_OPS_TOKEN", "TWPWA_OPS_PASSWORD",
+        "RAG_TOP_K", "LLM_BACKEND", "OLLAMA_LLM_MODEL",
+        "TWPWA_OPS_TOKEN", "TWPWA_OPS_PASSWORD",
         "TWPWA_DEV_TOKEN", "TWPWA_DEV_PASSWORD",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -53,6 +54,8 @@ def test_notebooks_and_defaults(config_env):
     assert cfg.ollama_url == "http://ollama:11434"
     assert cfg.embed_model == "nomic-embed-text"
     assert cfg.rag_top_k == 8
+    assert cfg.llm_backend == "gemini"
+    assert cfg.ollama_llm_model == "llama3.2"
 
 
 def test_env_overrides_and_notebook_secrets(config_env):

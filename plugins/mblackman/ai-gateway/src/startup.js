@@ -71,6 +71,20 @@ exports.startup = function() {
         return fetch(baseURL + "/notebooks/" + notebook + "/tiddlers?filter=" + encodeURIComponent(filter), {
           headers: headers()
         }).then(function(r) { return r.json(); }).then(function(d) { return d.titles || d.tiddlers || []; });
+      },
+      related: function(title, k) {
+        return fetch(baseURL + "/notebooks/" + notebook + "/related?title=" + encodeURIComponent(title) + "&k=" + (k || 5), {
+          headers: headers()
+        }).then(function(r) {
+          if (!r.ok) {
+            return r.json().catch(function() { return {}; }).then(function(errBody) {
+              var err = new Error(errBody.detail || ("HTTP " + r.status));
+              err.status = r.status;
+              throw err;
+            });
+          }
+          return r.json();
+        });
       }
     };
 
@@ -132,6 +146,27 @@ exports.startup = function() {
         setState("$:/state/ai-gateway/summarizing", "");
         setState("$:/state/ai-gateway/summary-error", askErrorMessage(err));
         dbg("summarize FAILED: " + err.message);
+      });
+    });
+
+    $tw.rootWidget.addEventListener("tm-related-notes", function(event) {
+      var title = event.param || "";
+      if (!title) return;
+      var stateTitle = "$:/temp/ai-gateway/related/" + title;
+      dbg("tm-related-notes fired; title=" + JSON.stringify(title));
+      setState("$:/state/ai-gateway/related-loading", title);
+      $tw.TiddlyPWAGateway.related(title, 5).then(function(data) {
+        var items = (data.related || []).map(function(r) { return "* [[" + r.title + "]]"; }).join("\n");
+        if (!items) {
+          items = "//No related notes found" + (data.truncated ? " yet — the index is still warming, try again//" : ".//");
+        }
+        setState(stateTitle, items);
+        setState("$:/state/ai-gateway/related-loading", "");
+        dbg("related ok; count=" + ((data.related || []).length));
+      }).catch(function(err) {
+        setState(stateTitle, "//" + askErrorMessage(err) + "//");
+        setState("$:/state/ai-gateway/related-loading", "");
+        dbg("related FAILED (" + (err.status || "network") + "): " + err.message);
       });
     });
 

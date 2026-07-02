@@ -14,6 +14,22 @@
 <div class="ai-gw-field-group">
 <span class="ai-gw-label">Filter <span class="ai-gw-label-hint">(optional)</span></span>
 <$edit-text tiddler="$:/state/ai-gateway/filter" tag="input" placeholder="[!is[system]]"/>
+<div class="ai-gw-presets">
+<$button class="ai-gw-preset" tooltip="Search every note (clears the filter)">
+<$action-setfield $tiddler="$:/state/ai-gateway/filter" text=""/>
+everything
+</$button>
+<$button class="ai-gw-preset" tooltip="Only the note currently open in the story">
+<$action-setfield $tiddler="$:/state/ai-gateway/filter" text={{{ [{$:/HistoryList!!current-tiddler}format:titlelist[]] }}}/>
+this note
+</$button>
+<$button class="ai-gw-preset" tooltip="Notes sharing the open note's first tag">
+<$vars lb="[tag[" rb="]]">
+<$action-setfield $tiddler="$:/state/ai-gateway/filter" text={{{ [{$:/HistoryList!!current-tiddler}get[tags]enlist-input[]first[]addprefix<lb>addsuffix<rb>] }}}/>
+</$vars>
+its tag
+</$button>
+</div>
 </div>
 
 <$reveal state="$:/state/ai-gateway/asking" type="match" text="yes">

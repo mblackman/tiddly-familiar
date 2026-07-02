@@ -1,9 +1,18 @@
 import re
 
+import httpx
+import numpy as np
 from google import genai
 from google.genai import types
 
 from .embeddings import Embedder, rank
+
+# Local generation is CPU-bound and can legitimately take minutes.
+_OLLAMA_GEN_TIMEOUT = 300.0
+
+
+class GenerationError(RuntimeError):
+    """Local-LLM backend failure, with a message safe to show to the caller."""
 
 # --- retrieval tuning ---
 
@@ -106,6 +115,33 @@ def _excerpt(text: str, chunks: list[tuple[int, str, float]]) -> str:
     return "\n[...]\n".join(text[s:e] for s, e in merged)
 
 
+async def _score_candidate_chunks(
+    query_vec: list[float],
+    candidates: list[dict],
+    embedder: Embedder,
+    max_embed: int | None,
+) -> tuple[list[tuple[int, int, str]], list[float], bool]:
+    """Chunk every candidate, embed the chunks, cosine-score them against the
+    query. Returns (records, cos, truncated) where records[i] is
+    (candidate index, offset, chunk) and cos[i] its score — 0.0 for chunks
+    whose vector wasn't computed yet (see `max_embed`)."""
+    records = [
+        (ci, offset, chunk)
+        for ci, t in enumerate(candidates)
+        for offset, chunk in _chunk_text(t.get("text", ""))
+    ]
+    embed_texts = [_embed_text(_title(candidates[ci]), chunk) for ci, _o, chunk in records]
+
+    vecs = await embedder.embed_documents(embed_texts, max_new=max_embed)
+    truncated = any(v is None for v in vecs)
+
+    cos = [0.0] * len(records)
+    embedded = [(i, v) for i, v in enumerate(vecs) if v is not None]
+    for rank_idx, score in rank(query_vec, [v for _i, v in embedded]):
+        cos[embedded[rank_idx][0]] = score
+    return records, cos, truncated
+
+
 async def retrieve(
     question: str,
     tiddlers: list[dict],
@@ -127,22 +163,10 @@ async def retrieve(
     if not candidates:
         return [], False
 
-    # (candidate index, offset, chunk) for every chunk of every candidate.
-    records = [
-        (ci, offset, chunk)
-        for ci, t in enumerate(candidates)
-        for offset, chunk in _chunk_text(t.get("text", ""))
-    ]
-    embed_texts = [_embed_text(_title(candidates[ci]), chunk) for ci, _o, chunk in records]
-
     query_vec = await embedder.embed_query(question)
-    vecs = await embedder.embed_documents(embed_texts, max_new=max_embed)
-    truncated = any(v is None for v in vecs)
-
-    cos = [0.0] * len(records)
-    embedded = [(i, v) for i, v in enumerate(vecs) if v is not None]
-    for rank_idx, score in rank(query_vec, [v for _i, v in embedded]):
-        cos[embedded[rank_idx][0]] = score
+    records, cos, truncated = await _score_candidate_chunks(
+        query_vec, candidates, embedder, max_embed
+    )
 
     terms = _query_terms(question)
     kw = [_keyword_score(terms, t) for t in candidates]
@@ -165,6 +189,54 @@ async def retrieve(
     return selected, truncated
 
 
+async def related(
+    target: dict,
+    tiddlers: list[dict],
+    embedder: Embedder,
+    top_k: int,
+    max_embed: int | None = None,
+) -> tuple[list[dict], bool]:
+    """Tiddlers most similar to `target`, by embedding similarity alone.
+    Returns ([{title, score}], truncated), best first, zero-similarity
+    candidates dropped.
+
+    The query vector is the mean of the target's chunk vectors (embedded
+    without a miss budget — in the common case they're already cached from a
+    prior ask). Candidates rank by their best chunk, like `retrieve`.
+    """
+    t_title = _title(target)
+    text = target.get("text", "")
+    if not text.strip():
+        return [], False
+    target_vecs = [
+        v
+        for v in await embedder.embed_documents(
+            [_embed_text(t_title, chunk) for _o, chunk in _chunk_text(text)]
+        )
+        if v is not None
+    ]
+    query_vec = np.mean(np.asarray(target_vecs, dtype=np.float32), axis=0).tolist()
+
+    candidates = [
+        t for t in tiddlers if t.get("text", "").strip() and _title(t) != t_title
+    ]
+    if not candidates:
+        return [], False
+    records, cos, truncated = await _score_candidate_chunks(
+        query_vec, candidates, embedder, max_embed
+    )
+
+    best: dict[int, float] = {}
+    for i, (ci, _offset, _chunk) in enumerate(records):
+        best[ci] = max(best.get(ci, cos[i]), cos[i])
+
+    top = sorted((ci for ci in best if best[ci] > 0), key=lambda ci: -best[ci])
+    return [
+        {"title": _title(candidates[ci]), "score": round(best[ci], 4)}
+        for ci in top[:top_k]
+    ], truncated
+
+
 def _build_context(tiddlers: list[dict]) -> tuple[str, list[str]]:
     """Assemble the generation context, stopping at the total budget — input
     is ranked best-first, so overflow drops the least relevant notes."""
@@ -184,34 +256,78 @@ def _build_context(tiddlers: list[dict]) -> tuple[str, list[str]]:
     return "\n\n".join(parts), sources
 
 
-async def _generate(question: str, tiddlers: list[dict], api_key: str, model: str) -> dict:
-    """Send the (already-ranked) tiddlers to Gemini and return {answer, sources}.
-    Sources are derived from [[Note Title]] citations in the answer text."""
-    context, available_titles = _build_context(tiddlers)
-    title_set = set(available_titles)
+_SYSTEM_INSTRUCTION = (
+    "You are answering questions about a personal TiddlyWiki notebook. "
+    "Use only the provided notes to answer. "
+    "Format the answer in Markdown. "
+    "When you reference a specific note, cite it inline using TiddlyWiki link "
+    "syntax: [[Note Title]] — use the exact title as given in the notes. "
+    "If the notes don't contain enough information, say so."
+)
 
-    client = genai.Client(api_key=api_key)
+
+async def _generate(question: str, tiddlers: list[dict], cfg) -> dict:
+    """Send the (already-ranked) tiddlers to the configured generation backend
+    and return {answer, sources}. Sources are derived from [[Note Title]]
+    citations in the answer text."""
+    context, available_titles = _build_context(tiddlers)
     prompt = f"Here are the relevant notes:\n\n{context}\n\nQuestion: {question}"
 
+    if cfg.llm_backend == "ollama":
+        answer = await _generate_ollama(prompt, cfg.ollama_url, cfg.ollama_llm_model)
+    else:
+        answer = await _generate_gemini(prompt, cfg.gemini_api_key, cfg.gemini_model)
+
+    answer = answer or "The AI model returned no answer for this question."
+    return {"answer": answer, "sources": _extract_citations(answer, set(available_titles))}
+
+
+async def _generate_gemini(prompt: str, api_key: str, model: str) -> str:
+    client = genai.Client(api_key=api_key)
     response = await client.aio.models.generate_content(
         model=model,
         contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=(
-                "You are answering questions about a personal TiddlyWiki notebook. "
-                "Use only the provided notes to answer. "
-                "Format the answer in Markdown. "
-                "When you reference a specific note, cite it inline using TiddlyWiki link "
-                "syntax: [[Note Title]] — use the exact title as given in the notes. "
-                "If the notes don't contain enough information, say so."
-            ),
-        ),
+        config=types.GenerateContentConfig(system_instruction=_SYSTEM_INSTRUCTION),
     )
-
     # response.text is Optional — None when the response has no text parts
     # (e.g. blocked by safety filters or an empty candidate).
-    answer = response.text or "The AI model returned no answer for this question."
-    return {"answer": answer, "sources": _extract_citations(answer, title_set)}
+    return response.text or ""
+
+
+async def _generate_ollama(prompt: str, ollama_url: str, model: str) -> str:
+    """Fully-local generation via Ollama's /api/chat. Failures surface as
+    GenerationError so callers can distinguish them from Gemini problems."""
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_INSTRUCTION},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_OLLAMA_GEN_TIMEOUT) as client:
+            resp = await client.post(f"{ollama_url.rstrip('/')}/api/chat", json=payload)
+            resp.raise_for_status()
+    except httpx.ConnectError as e:
+        raise GenerationError(
+            "Cannot reach the local LLM service — Ollama may still be starting up."
+        ) from e
+    except httpx.TimeoutException as e:
+        raise GenerationError(
+            "The local LLM timed out — it may be busy or the model too large "
+            "for this host. Please try again."
+        ) from e
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise GenerationError(
+                f"Local LLM model '{model}' is not available — it may still be "
+                "downloading. Please wait and try again."
+            ) from e
+        raise GenerationError(
+            f"Local LLM service returned {e.response.status_code}."
+        ) from e
+    return (resp.json().get("message") or {}).get("content", "")
 
 
 def _extract_citations(answer: str, title_set: set[str]) -> list[str]:
@@ -229,13 +345,12 @@ async def answer_question(
     question: str,
     tiddlers: list[dict],
     embedder: Embedder,
-    top_k: int,
-    api_key: str,
-    model: str,
+    cfg,
     max_embed: int | None = None,
 ) -> dict:
     """RAG orchestrator: hybrid-rank the candidate tiddlers (see `retrieve`),
-    keep the top-k, and hand budgeted excerpts to Gemini for generation.
+    keep the top rag_top_k, and hand budgeted excerpts to the configured
+    generation backend (`cfg.llm_backend`: Gemini or local Ollama).
 
     `max_embed` only bounds how many embedding-cache *misses* are computed this
     request. Skipped misses are cached on later requests, so coverage converges
@@ -244,7 +359,7 @@ async def answer_question(
     everything yet).
     """
     selected, truncated = await retrieve(
-        question, tiddlers, embedder, top_k, max_embed=max_embed
+        question, tiddlers, embedder, cfg.rag_top_k, max_embed=max_embed
     )
     if not selected:
         return {
@@ -252,6 +367,6 @@ async def answer_question(
             "sources": [],
             "truncated": False,
         }
-    result = await _generate(question, selected, api_key=api_key, model=model)
+    result = await _generate(question, selected, cfg)
     result["truncated"] = truncated
     return result

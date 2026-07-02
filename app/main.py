@@ -206,6 +206,32 @@ async def sync(nb: str):
     return {"ok": True}
 
 
+@app.get("/notebooks/{nb}/related", dependencies=[Depends(require_auth)])
+async def related(
+    nb: str,
+    title: str,
+    k: int = Query(5, ge=1, le=50),
+    filter: str = Query("[!is[system]]"),
+    max_tiddlers: int = Query(100, ge=1, le=1000),
+):
+    nbm = _get_notebook(nb)
+    try:
+        return await service.related(
+            nbm,
+            title,
+            config=_config,
+            embedder=_embedder,
+            k=k,
+            filter=filter,
+            max_tiddlers=max_tiddlers,
+        )
+    except service.AskError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    except Exception as e:
+        # Same CORS rationale as /ask below.
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/notebooks/{nb}/ask", dependencies=[Depends(require_auth)])
 async def ask(nb: str, body: AskBody):
     nbm = _get_notebook(nb)

@@ -137,6 +137,30 @@ def test_ask_embedding_failure_is_friendly_503(client, monkeypatch):
     assert "Ollama" in resp.json()["detail"]
 
 
+def test_related_success(client, monkeypatch):
+    c, _ = client
+
+    async def fake_related(target, tiddlers, embedder, top_k, max_embed=None):
+        assert target["title"] == "Existing"
+        return [{"title": "Neighbour", "score": 0.7}], False
+
+    monkeypatch.setattr(service, "ai_related", fake_related)
+    resp = c.get(
+        "/notebooks/dev/related", params={"title": "Existing", "k": 3}, headers=AUTH
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "related": [{"title": "Neighbour", "score": 0.7}],
+        "truncated": False,
+    }
+
+
+def test_related_missing_title_is_404(client):
+    c, _ = client
+    resp = c.get("/notebooks/dev/related", params={"title": "Nope"}, headers=AUTH)
+    assert resp.status_code == 404
+
+
 def test_ask_unexpected_error_is_500_with_cors(client, monkeypatch):
     """Unhandled exceptions must become HTTPExceptions so the response still
     flows through CORSMiddleware (a bare 500 looks like a CORS error in the

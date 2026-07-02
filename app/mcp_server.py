@@ -122,6 +122,28 @@ async def render_tiddler(
 
 
 @mcp.tool()
+async def related_tiddlers(
+    notebook: str,
+    title: str,
+    k: int = 5,
+    filter: str = "[!is[system]]",
+) -> dict:
+    """
+    Find the tiddlers most similar to 'title' by local embedding similarity
+    (no generation model involved — fast and fully local).
+
+    Returns {related: [{title, score}], truncated} best-first; score is cosine
+    similarity in 0..1. 'truncated' true means some candidates aren't embedded
+    yet — repeat the call to make progress. 'filter' narrows the candidate
+    pool, e.g. [tag[project]].
+    """
+    nbm = _nb(notebook)
+    return await service.related(
+        nbm, title, config=_config, embedder=_embedder, k=k, filter=filter
+    )
+
+
+@mcp.tool()
 async def ask_notebook(
     notebook: str,
     question: str,

@@ -1,13 +1,19 @@
-"""Pure helpers in app.ai: context assembly, budgets, chunking, keywords."""
+"""Pure helpers in app.ai: context assembly, budgets, chunking, keywords,
+and the local-LLM generation backend."""
 
+import asyncio
+
+import httpx
 import pytest
 
 from app import ai
 from app.ai import (
+    GenerationError,
     _build_context,
     _chunk_text,
     _embed_text,
     _excerpt,
+    _generate_ollama,
     _keyword_score,
     _query_terms,
 )
@@ -125,3 +131,65 @@ def test_excerpt_merges_overlapping_chunks(monkeypatch):
     ]
     # The two winners overlap on "cc" — merged into one continuous span.
     assert _excerpt(text, chunks) == "bbbbccccdd"
+
+
+# --- Ollama generation backend ---
+
+
+def _patch_ollama(monkeypatch, respond):
+    """Replace httpx.AsyncClient in ai.py with a stub whose post() is `respond`."""
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            return await respond(url, json)
+
+    monkeypatch.setattr(ai.httpx, "AsyncClient", FakeClient)
+
+
+def test_generate_ollama_happy_path(monkeypatch):
+    seen = {}
+
+    async def respond(url, payload):
+        seen["url"] = url
+        seen["payload"] = payload
+        return httpx.Response(
+            200,
+            json={"message": {"role": "assistant", "content": "local answer"}},
+            request=httpx.Request("POST", url),
+        )
+
+    _patch_ollama(monkeypatch, respond)
+    answer = asyncio.run(_generate_ollama("prompt", "http://ollama:11434/", "m"))
+    assert answer == "local answer"
+    assert seen["url"] == "http://ollama:11434/api/chat"
+    assert seen["payload"]["stream"] is False
+    assert [m["role"] for m in seen["payload"]["messages"]] == ["system", "user"]
+
+
+def test_generate_ollama_missing_model_is_friendly(monkeypatch):
+    async def respond(url, payload):
+        return httpx.Response(404, request=httpx.Request("POST", url))
+
+    _patch_ollama(monkeypatch, respond)
+    with pytest.raises(GenerationError) as exc:
+        asyncio.run(_generate_ollama("prompt", "http://ollama:11434", "tiny-llm"))
+    assert "tiny-llm" in str(exc.value)
+
+
+def test_generate_ollama_connect_error_is_friendly(monkeypatch):
+    async def respond(url, payload):
+        raise httpx.ConnectError("refused")
+
+    _patch_ollama(monkeypatch, respond)
+    with pytest.raises(GenerationError) as exc:
+        asyncio.run(_generate_ollama("prompt", "http://ollama:11434", "m"))
+    assert "starting up" in str(exc.value)

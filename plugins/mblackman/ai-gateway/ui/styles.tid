@@ -209,6 +209,96 @@
   margin-bottom: 1em;
 }
 
+.ai-gw-presets {
+  display: flex;
+  gap: 0.35em;
+  margin-top: 0.4em;
+}
+
+.ai-gw-preset {
+  background: <<colour tiddler-background>>;
+  color: <<colour foreground>>;
+  border: 1px solid <<colour tiddler-border>>;
+  border-radius: 999px;
+  padding: 0.1em 0.7em;
+  font-size: 0.78em;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.ai-gw-preset:hover {
+  border-color: <<colour primary>>;
+  color: <<colour primary>>;
+  opacity: 1;
+}
+
+.ai-gw-related {
+  margin-top: 1em;
+}
+
+.ai-gw-related-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: 0.88em;
+  font-style: italic;
+  color: <<colour foreground>>;
+  opacity: 0.65;
+}
+
+.ai-gw-related-btn.tc-btn-invisible {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  font-size: 0.82em;
+  color: <<colour foreground>>;
+  opacity: 0.45;
+}
+
+.ai-gw-related-btn.tc-btn-invisible:hover {
+  opacity: 0.9;
+  color: <<colour primary>>;
+}
+
+.ai-gw-related-box {
+  border-left: 3px solid <<colour primary>>;
+  background: <<colour tiddler-background>>;
+  border-radius: 3px;
+  padding: 0.65em 0.9em;
+  font-size: 0.9em;
+}
+
+.ai-gw-related-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: 0.72em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: <<colour primary>>;
+  opacity: 0.85;
+  margin-bottom: 0.45em;
+}
+
+.ai-gw-related-refresh.tc-btn-invisible {
+  margin-left: auto;
+  opacity: 0.35;
+  color: <<colour foreground>>;
+}
+
+.ai-gw-related-clear.tc-btn-invisible {
+  font-size: 1.1em;
+  opacity: 0.35;
+  padding: 0 0.1em;
+  color: <<colour foreground>>;
+}
+
+.ai-gw-related-refresh.tc-btn-invisible:hover,
+.ai-gw-related-clear.tc-btn-invisible:hover {
+  opacity: 0.9;
+}
+
 .ai-gw-toolbar-btn {
   display: inline-flex;
   align-items: center;

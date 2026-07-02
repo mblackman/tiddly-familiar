@@ -11,3 +11,35 @@
 <$transclude field="summary" mode="block"/>
 </div>
 </$list>
+
+<$list filter="[<currentTiddler>!has[draft.of]!is[system]!is[missing]]" variable="ignore">
+<$set name="relatedState" value={{{ [[$:/temp/ai-gateway/related/]addsuffix<currentTiddler>] }}}>
+<div class="ai-gw-related">
+<$reveal state="$:/state/ai-gateway/related-loading" type="match" text=<<currentTiddler>>>
+<span class="ai-gw-related-loading"><span class="ai-gw-spinner"></span> Finding related notes…</span>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/related-loading" type="nomatch" text=<<currentTiddler>>>
+<$list filter="[<relatedState>is[missing]]" variable="ignore-missing">
+<$button class="tc-btn-invisible ai-gw-related-btn" tooltip="Find related notes via the AI gateway">
+<$action-sendmessage $message="tm-related-notes" $param=<<currentTiddler>>/>
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Related notes
+</$button>
+</$list>
+<$list filter="[<relatedState>!is[missing]]" variable="ignore-present">
+<div class="ai-gw-related-box">
+<div class="ai-gw-related-head">
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Related notes
+<$button class="tc-btn-invisible ai-gw-related-refresh" tooltip="Refresh related notes">
+<$action-sendmessage $message="tm-related-notes" $param=<<currentTiddler>>/>↻
+</$button>
+<$button class="tc-btn-invisible ai-gw-related-clear" tooltip="Hide related notes">
+<$action-deletetiddler $filter="[<relatedState>]"/>×
+</$button>
+</div>
+<$transclude tiddler=<<relatedState>> mode="block"/>
+</div>
+</$list>
+</$reveal>
+</div>
+</$set>
+</$list>

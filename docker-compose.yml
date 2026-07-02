@@ -33,9 +33,13 @@ services:
       - ollama:/root/.ollama
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-c"]
-    command: ["ollama serve & until ollama list >/dev/null 2>&1; do sleep 2; done; echo Pulling $$EMBED_MODEL; ollama pull $$EMBED_MODEL; wait"]
+    command: ["ollama serve & until ollama list >/dev/null 2>&1; do sleep 2; done; echo Pulling $$EMBED_MODEL; ollama pull $$EMBED_MODEL; if [ \"$$LLM_BACKEND\" = ollama ]; then echo Pulling $$OLLAMA_LLM_MODEL; ollama pull $$OLLAMA_LLM_MODEL; fi; wait"]
+    # These interpolate from the project .env (compose reads it for ${...}),
+    # so the generation model is only pulled when the local backend is enabled.
     environment:
       EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      LLM_BACKEND: ${LLM_BACKEND:-gemini}
+      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-llama3.2}
     networks:
       - default
 
