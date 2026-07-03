@@ -1,3 +1,4 @@
+import json
 import re
 
 import httpx
@@ -9,6 +10,12 @@ from .embeddings import Embedder, rank
 
 # Local generation is CPU-bound and can legitimately take minutes.
 _OLLAMA_GEN_TIMEOUT = 300.0
+
+# Rolling chat history sent as prior turns. Old turns carry the least signal,
+# so trimming drops from the front; the char budget stops a few huge answers
+# from crowding the actual notes out of the model's attention.
+_MAX_HISTORY_TURNS = 10
+_HISTORY_CHAR_BUDGET = 8000
 
 
 class GenerationError(RuntimeError):
@@ -266,68 +273,189 @@ _SYSTEM_INSTRUCTION = (
 )
 
 
-async def _generate(question: str, tiddlers: list[dict], cfg) -> dict:
+def _trim_history(history: list[dict] | None) -> list[dict]:
+    """The most recent chat turns that fit the turn/char budgets. The newest
+    turn always survives — it may hold the antecedent of a follow-up question."""
+    turns = [
+        t
+        for t in (history or [])
+        if t.get("content") and t.get("role") in ("user", "assistant")
+    ][-_MAX_HISTORY_TURNS:]
+    kept: list[dict] = []
+    used = 0
+    for t in reversed(turns):
+        used += len(t["content"])
+        if kept and used > _HISTORY_CHAR_BUDGET:
+            break
+        kept.append(t)
+    return list(reversed(kept))
+
+
+def _ollama_messages(system: str, prompt: str, history: list[dict] | None) -> list[dict]:
+    return (
+        [{"role": "system", "content": system}]
+        + [{"role": t["role"], "content": t["content"]} for t in _trim_history(history)]
+        + [{"role": "user", "content": prompt}]
+    )
+
+
+def _gemini_contents(prompt: str, history: list[dict] | None) -> list:
+    contents = [
+        types.Content(
+            role="user" if t["role"] == "user" else "model",
+            parts=[types.Part(text=t["content"])],
+        )
+        for t in _trim_history(history)
+    ]
+    contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
+    return contents
+
+
+def _build_prompt(question: str, tiddlers: list[dict]) -> tuple[str, list[str]]:
+    context, titles = _build_context(tiddlers)
+    return f"Here are the relevant notes:\n\n{context}\n\nQuestion: {question}", titles
+
+
+async def _generate_text(
+    system: str, prompt: str, cfg, history: list[dict] | None = None
+) -> str:
+    """Dispatch one generation to the configured backend (Gemini or Ollama)."""
+    if cfg.llm_backend == "ollama":
+        return await _generate_ollama(
+            prompt, cfg.ollama_url, cfg.ollama_llm_model, system=system, history=history
+        )
+    return await _generate_gemini(
+        prompt, cfg.gemini_api_key, cfg.gemini_model, system=system, history=history
+    )
+
+
+async def _generate(
+    question: str, tiddlers: list[dict], cfg, history: list[dict] | None = None
+) -> dict:
     """Send the (already-ranked) tiddlers to the configured generation backend
     and return {answer, sources}. Sources are derived from [[Note Title]]
     citations in the answer text."""
-    context, available_titles = _build_context(tiddlers)
-    prompt = f"Here are the relevant notes:\n\n{context}\n\nQuestion: {question}"
-
-    if cfg.llm_backend == "ollama":
-        answer = await _generate_ollama(prompt, cfg.ollama_url, cfg.ollama_llm_model)
-    else:
-        answer = await _generate_gemini(prompt, cfg.gemini_api_key, cfg.gemini_model)
-
+    prompt, available_titles = _build_prompt(question, tiddlers)
+    answer = await _generate_text(_SYSTEM_INSTRUCTION, prompt, cfg, history)
     answer = answer or "The AI model returned no answer for this question."
     return {"answer": answer, "sources": _extract_citations(answer, set(available_titles))}
 
 
-async def _generate_gemini(prompt: str, api_key: str, model: str) -> str:
+async def _generate_gemini(
+    prompt: str,
+    api_key: str,
+    model: str,
+    system: str = _SYSTEM_INSTRUCTION,
+    history: list[dict] | None = None,
+) -> str:
     client = genai.Client(api_key=api_key)
     response = await client.aio.models.generate_content(
         model=model,
-        contents=prompt,
-        config=types.GenerateContentConfig(system_instruction=_SYSTEM_INSTRUCTION),
+        contents=_gemini_contents(prompt, history),
+        config=types.GenerateContentConfig(system_instruction=system),
     )
     # response.text is Optional — None when the response has no text parts
     # (e.g. blocked by safety filters or an empty candidate).
     return response.text or ""
 
 
-async def _generate_ollama(prompt: str, ollama_url: str, model: str) -> str:
+async def _stream_gemini(
+    prompt: str,
+    api_key: str,
+    model: str,
+    system: str = _SYSTEM_INSTRUCTION,
+    history: list[dict] | None = None,
+):
+    client = genai.Client(api_key=api_key)
+    stream = await client.aio.models.generate_content_stream(
+        model=model,
+        contents=_gemini_contents(prompt, history),
+        config=types.GenerateContentConfig(system_instruction=system),
+    )
+    async for chunk in stream:
+        if chunk.text:
+            yield chunk.text
+
+
+def _ollama_error(exc: httpx.HTTPError, model: str) -> GenerationError:
+    """Map an httpx failure toward Ollama to a message safe to show the caller."""
+    if isinstance(exc, httpx.ConnectError):
+        return GenerationError(
+            "Cannot reach the local LLM service — Ollama may still be starting up."
+        )
+    if isinstance(exc, httpx.TimeoutException):
+        return GenerationError(
+            "The local LLM timed out — it may be busy or the model too large "
+            "for this host. Please try again."
+        )
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code == 404:
+            return GenerationError(
+                f"Local LLM model '{model}' is not available — it may still be "
+                "downloading. Please wait and try again."
+            )
+        return GenerationError(f"Local LLM service returned {exc.response.status_code}.")
+    return GenerationError(f"Local LLM request failed: {exc}")
+
+
+async def _generate_ollama(
+    prompt: str,
+    ollama_url: str,
+    model: str,
+    system: str = _SYSTEM_INSTRUCTION,
+    history: list[dict] | None = None,
+) -> str:
     """Fully-local generation via Ollama's /api/chat. Failures surface as
     GenerationError so callers can distinguish them from Gemini problems."""
     payload = {
         "model": model,
-        "messages": [
-            {"role": "system", "content": _SYSTEM_INSTRUCTION},
-            {"role": "user", "content": prompt},
-        ],
+        "messages": _ollama_messages(system, prompt, history),
         "stream": False,
     }
     try:
         async with httpx.AsyncClient(timeout=_OLLAMA_GEN_TIMEOUT) as client:
             resp = await client.post(f"{ollama_url.rstrip('/')}/api/chat", json=payload)
             resp.raise_for_status()
-    except httpx.ConnectError as e:
-        raise GenerationError(
-            "Cannot reach the local LLM service — Ollama may still be starting up."
-        ) from e
-    except httpx.TimeoutException as e:
-        raise GenerationError(
-            "The local LLM timed out — it may be busy or the model too large "
-            "for this host. Please try again."
-        ) from e
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            raise GenerationError(
-                f"Local LLM model '{model}' is not available — it may still be "
-                "downloading. Please wait and try again."
-            ) from e
-        raise GenerationError(
-            f"Local LLM service returned {e.response.status_code}."
-        ) from e
+    except httpx.HTTPError as e:
+        raise _ollama_error(e, model) from e
     return (resp.json().get("message") or {}).get("content", "")
+
+
+async def _stream_ollama(
+    prompt: str,
+    ollama_url: str,
+    model: str,
+    system: str = _SYSTEM_INSTRUCTION,
+    history: list[dict] | None = None,
+):
+    """Streaming twin of _generate_ollama: /api/chat with stream=true yields
+    NDJSON lines, one message fragment each."""
+    payload = {
+        "model": model,
+        "messages": _ollama_messages(system, prompt, history),
+        "stream": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_OLLAMA_GEN_TIMEOUT) as client:
+            async with client.stream(
+                "POST", f"{ollama_url.rstrip('/')}/api/chat", json=payload
+            ) as resp:
+                if resp.status_code >= 400:
+                    await resp.aread()
+                    resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.strip():
+                        continue
+                    data = json.loads(line)
+                    if data.get("error"):
+                        raise GenerationError(f"Local LLM error: {data['error']}")
+                    text = (data.get("message") or {}).get("content", "")
+                    if text:
+                        yield text
+                    if data.get("done"):
+                        return
+    except httpx.HTTPError as e:
+        raise _ollama_error(e, model) from e
 
 
 def _extract_citations(answer: str, title_set: set[str]) -> list[str]:
@@ -347,6 +475,7 @@ async def answer_question(
     embedder: Embedder,
     cfg,
     max_embed: int | None = None,
+    history: list[dict] | None = None,
 ) -> dict:
     """RAG orchestrator: hybrid-rank the candidate tiddlers (see `retrieve`),
     keep the top rag_top_k, and hand budgeted excerpts to the configured
@@ -357,6 +486,10 @@ async def answer_question(
     to the full corpus. Returns {answer, sources, truncated} — `truncated` is
     True while some chunks were skipped (i.e. the answer may not have seen
     everything yet).
+
+    `history` is prior chat turns as [{role: user|assistant, content}] —
+    retrieval ranks by the current question alone; history only shapes the
+    generated answer (follow-ups, pronouns).
     """
     selected, truncated = await retrieve(
         question, tiddlers, embedder, cfg.rag_top_k, max_embed=max_embed
@@ -367,6 +500,150 @@ async def answer_question(
             "sources": [],
             "truncated": False,
         }
-    result = await _generate(question, selected, cfg)
+    result = await _generate(question, selected, cfg, history)
     result["truncated"] = truncated
     return result
+
+
+async def answer_question_stream(
+    question: str,
+    tiddlers: list[dict],
+    embedder: Embedder,
+    cfg,
+    max_embed: int | None = None,
+    history: list[dict] | None = None,
+):
+    """Streaming twin of `answer_question`. Retrieval is identical; only the
+    generation call streams. Yields ("delta", {text}) per model fragment, then
+    one final ("done", {answer, sources, truncated}) with the assembled answer
+    (sources need the full text, so they can only be extracted at the end)."""
+    selected, truncated = await retrieve(
+        question, tiddlers, embedder, cfg.rag_top_k, max_embed=max_embed
+    )
+    if not selected:
+        yield (
+            "done",
+            {
+                "answer": "There are no notes matching that filter to answer from.",
+                "sources": [],
+                "truncated": False,
+            },
+        )
+        return
+
+    prompt, available_titles = _build_prompt(question, selected)
+    if cfg.llm_backend == "ollama":
+        stream = _stream_ollama(
+            prompt, cfg.ollama_url, cfg.ollama_llm_model, history=history
+        )
+    else:
+        stream = _stream_gemini(
+            prompt, cfg.gemini_api_key, cfg.gemini_model, history=history
+        )
+
+    parts: list[str] = []
+    async for text in stream:
+        parts.append(text)
+        yield ("delta", {"text": text})
+
+    answer = "".join(parts) or "The AI model returned no answer for this question."
+    yield (
+        "done",
+        {
+            "answer": answer,
+            "sources": _extract_citations(answer, set(available_titles)),
+            "truncated": truncated,
+        },
+    )
+
+
+# --- one-shot generation commands (no retrieval) ---
+
+# Each command is a prompt template over a single note's rendered text —
+# straight to the generation backend, skipping the embed/rank round-trip.
+_COMMAND_INPUT_BUDGET = 24000
+
+_COMMANDS: dict[str, dict] = {
+    "summarize": {
+        "system": (
+            "You summarize notes from a personal TiddlyWiki notebook. "
+            "Reply with only the summary in Markdown — no preamble, no headings."
+        ),
+        "prompt": "Summarize the following note in 2-3 sentences.\n\n# {title}\n\n{text}",
+    },
+    "tags": {
+        "system": (
+            "You suggest tags for notes in a personal TiddlyWiki notebook. "
+            "Reply with one tag per line, at most 5 lines, no bullets or "
+            "commentary. Prefer reusing tags from the existing vocabulary when "
+            "they fit; only invent a new tag when nothing existing applies. "
+            "Tags may contain spaces."
+        ),
+        "prompt": (
+            "Existing tags in this wiki: {vocabulary}\n\n"
+            "Suggest tags for the following note.\n\n# {title}\n\n{text}"
+        ),
+    },
+    "title": {
+        "system": (
+            "You write titles for notes in a personal TiddlyWiki notebook. "
+            "Reply with a single concise title of at most 60 characters — "
+            "no quotes, no commentary."
+        ),
+        "prompt": "Suggest a title for the following note.\n\n{text}",
+    },
+    "tasks": {
+        "system": (
+            "You extract open action items from notes in a personal TiddlyWiki "
+            "notebook. Reply with a Markdown bullet list, one task per line, "
+            "most urgent first. If there are no action items, reply exactly: "
+            "(no tasks found)"
+        ),
+        "prompt": "Extract the action items from the following note.\n\n# {title}\n\n{text}",
+    },
+}
+
+COMMANDS = frozenset(_COMMANDS)
+
+
+async def run_command(
+    command: str,
+    title: str,
+    text: str,
+    cfg,
+    vocabulary: list[str] | None = None,
+) -> str:
+    """One-shot transform of a single note. `vocabulary` (the wiki's existing
+    tags) only feeds the 'tags' command."""
+    spec = _COMMANDS[command]
+    prompt = spec["prompt"].format(
+        title=title,
+        text=text[:_COMMAND_INPUT_BUDGET],
+        vocabulary=", ".join(vocabulary or []) or "(none yet)",
+    )
+    return (await _generate_text(spec["system"], prompt, cfg)).strip()
+
+
+# --- scheduled synthesis digest ---
+
+_DIGEST_SYSTEM = (
+    "You write a digest of recent changes in a personal TiddlyWiki notebook. "
+    "Write TiddlyWiki wikitext: '!!' for headings, '*' for bullets, and link "
+    "to notes as [[Note Title]] using the exact titles given. Group related "
+    "changes, lead with the most significant, and keep it under 300 words. "
+    "Reply with only the digest."
+)
+
+
+async def digest_text(
+    tiddlers: list[dict], cfg, period: str = "the last 7 days"
+) -> tuple[str, list[str]]:
+    """Synthesize a what-changed digest over the given (recently modified,
+    best-first) tiddlers. Returns (wikitext, titles that fit the context)."""
+    context, titles = _build_context(tiddlers)
+    prompt = (
+        f"These notes changed in {period}, most recently modified first:\n\n"
+        f"{context}\n\nWrite the digest."
+    )
+    text = await _generate_text(_DIGEST_SYSTEM, prompt, cfg)
+    return text.strip(), titles

@@ -299,6 +299,66 @@
   opacity: 0.9;
 }
 
+.ai-gw-chat {
+  margin: 0.75em 0 0.25em;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.ai-gw-turn {
+  border-radius: 6px;
+  padding: 0.5em 0.8em;
+  font-size: 0.9em;
+  max-width: 92%;
+}
+
+.ai-gw-turn p:first-child { margin-top: 0; }
+.ai-gw-turn p:last-child { margin-bottom: 0; }
+
+.ai-gw-turn-user {
+  align-self: flex-end;
+  background: <<colour primary>>;
+  color: #fff;
+}
+
+.ai-gw-turn-user a.tc-tiddlylink { color: #fff; text-decoration: underline; }
+
+.ai-gw-turn-ai {
+  align-self: flex-start;
+  background: <<colour tiddler-background>>;
+  border: 1px solid <<colour tiddler-border>>;
+}
+
+.ai-gw-turn-streaming {
+  margin-top: 0.5em;
+}
+
+.ai-gw-turn-streaming .ai-gw-spinner {
+  margin-left: 0.35em;
+  opacity: 0.6;
+}
+
+.ai-gw-chat-actions {
+  margin-top: 0.6em;
+}
+
+.ai-gw-tag-suggestion {
+  background: <<colour tiddler-background>>;
+  color: <<colour primary>>;
+  border: 1px dashed <<colour primary>>;
+  border-radius: 999px;
+  padding: 0.1em 0.7em;
+  font-size: 0.85em;
+  cursor: pointer;
+  margin: 0 0.3em 0.3em 0;
+}
+
+.ai-gw-tag-suggestion:hover {
+  background: <<colour primary>>;
+  color: #fff;
+}
+
 .ai-gw-toolbar-btn {
   display: inline-flex;
   align-items: center;

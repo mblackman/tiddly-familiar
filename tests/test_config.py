@@ -26,6 +26,7 @@ def config_env(tmp_path, monkeypatch):
     for var in (
         "GEMINI_API_KEY", "GEMINI_MODEL", "OLLAMA_URL", "EMBED_MODEL",
         "RAG_TOP_K", "LLM_BACKEND", "OLLAMA_LLM_MODEL",
+        "DIGEST_NOTEBOOK", "DIGEST_HOUR_UTC", "DIGEST_FILTER",
         "TWPWA_OPS_TOKEN", "TWPWA_OPS_PASSWORD",
         "TWPWA_DEV_TOKEN", "TWPWA_DEV_PASSWORD",
     ):
@@ -80,3 +81,19 @@ def test_missing_gateway_key_raises(config_env):
     config_env.delenv("GATEWAY_API_KEY")
     with pytest.raises(KeyError):
         load_config()
+
+
+def test_digest_defaults_and_overrides(config_env):
+    cfg = load_config()
+    # Scheduler is off by default; the manual route still has a filter to use.
+    assert cfg.digest_notebook == ""
+    assert cfg.digest_hour_utc == 6
+    assert "days:modified[-7]" in cfg.digest_filter
+
+    config_env.setenv("DIGEST_NOTEBOOK", "ops")
+    config_env.setenv("DIGEST_HOUR_UTC", "22")
+    config_env.setenv("DIGEST_FILTER", "[tag[journal]]")
+    cfg = load_config()
+    assert cfg.digest_notebook == "ops"
+    assert cfg.digest_hour_utc == 22
+    assert cfg.digest_filter == "[tag[journal]]"

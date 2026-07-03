@@ -1,4 +1,5 @@
-\define ai-gw-clear-state()
+\define ai-gw-clear-chat()
+<$action-deletetiddler $filter="[prefix[$:/temp/ai-gateway/chat/]]"/>
 <$action-setfield $tiddler="$:/state/ai-gateway/answer" text=""/>
 <$action-setfield $tiddler="$:/state/ai-gateway/sources" text=""/>
 <$action-setfield $tiddler="$:/state/ai-gateway/sources-open" text="no"/>
@@ -42,14 +43,38 @@ its tag
 </$button>
 </$reveal>
 
+<$list filter="[prefix[$:/temp/ai-gateway/chat/]limit[1]]" variable="ignore-has-chat">
+<div class="ai-gw-chat">
+<$list filter="[prefix[$:/temp/ai-gateway/chat/]sort[title]]" variable="turn">
+<$vars turnClass={{{ [<turn>get[role]match[user]then[ai-gw-turn ai-gw-turn-user]else[ai-gw-turn ai-gw-turn-ai]] }}}>
+<div class=<<turnClass>>>
+<$transclude tiddler=<<turn>> mode="block"/>
+</div>
+</$vars>
+</$list>
+</div>
+</$list>
+
+<$reveal state="$:/state/ai-gateway/asking" type="match" text="yes">
+<$reveal state="$:/state/ai-gateway/answer" type="nomatch" text="">
+<div class="ai-gw-turn ai-gw-turn-ai ai-gw-turn-streaming">
+<$transclude tiddler="$:/state/ai-gateway/answer" mode="block"/>
+<span class="ai-gw-spinner"></span>
+</div>
+</$reveal>
+</$reveal>
+
+<$reveal state="$:/state/ai-gateway/asking" type="nomatch" text="yes">
 <$reveal state="$:/state/ai-gateway/answer" type="nomatch" text="">
 <div class="ai-gw-answer">
 <div class="ai-gw-answer-head">
-<span class="ai-gw-answer-label">Answer</span>
-<$button class="tc-btn-invisible ai-gw-btn-clear" tooltip="Clear"><<ai-gw-clear-state>>×</$button>
+<span class="ai-gw-answer-label">Problem</span>
+<$button class="tc-btn-invisible ai-gw-btn-clear" tooltip="Clear"><$action-setfield $tiddler="$:/state/ai-gateway/answer" text=""/>×</$button>
 </div>
 <div class="ai-gw-answer-body">{{$:/state/ai-gateway/answer}}</div>
 </div>
+</$reveal>
+</$reveal>
 
 <$reveal state="$:/state/ai-gateway/sources" type="nomatch" text="">
 <div class="ai-gw-sources">
@@ -62,6 +87,14 @@ its tag
 </$reveal>
 </div>
 </$reveal>
-</$reveal>
+
+<$list filter="[prefix[$:/temp/ai-gateway/chat/]limit[1]]" variable="ignore-clear">
+<div class="ai-gw-chat-actions">
+<$button class="ai-gw-preset" tooltip="Forget this conversation and start over">
+<<ai-gw-clear-chat>>
+New chat
+</$button>
+</div>
+</$list>
 
 </div>

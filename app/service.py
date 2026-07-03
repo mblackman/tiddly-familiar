@@ -6,14 +6,20 @@ failure (Ollama, Gemini transport, Gemini API) into an AskError with a
 user-facing message, so the two transports can't diverge in behaviour.
 """
 
+from datetime import date
+
 import httpx
 from google.genai import errors as genai_errors
 
-from .ai import GenerationError, answer_question
+from .ai import COMMANDS, GenerationError, answer_question, answer_question_stream
+from .ai import digest_text as ai_digest_text
 from .ai import related as ai_related
+from .ai import run_command
 from .embeddings import EmbeddingError
 
 DEFAULT_FILTER = "[!is[system]]"
+
+DIGEST_TAG = "ai-digest"
 
 
 class AskError(RuntimeError):
@@ -28,6 +34,33 @@ class AskError(RuntimeError):
         self.status = status
 
 
+def _translate(e: Exception) -> AskError:
+    """Map a generation/embedding backend failure to an AskError."""
+    if isinstance(e, (EmbeddingError, GenerationError)):
+        return AskError(str(e), 503)
+    if isinstance(e, (httpx.ConnectError, httpx.TimeoutException)):
+        # Embedder httpx errors are wrapped in EmbeddingError and local-LLM
+        # ones in GenerationError, so anything reaching here came from the
+        # Gemini client's transport.
+        return AskError(
+            "Cannot reach the AI model service — network issue toward Gemini. "
+            "Please try again.",
+            503,
+        )
+    if isinstance(e, genai_errors.ServerError):
+        return AskError(
+            "The AI model is busy right now. Please try again in a moment.", 503
+        )
+    if isinstance(e, genai_errors.ClientError):
+        return AskError(f"AI model error: {e.message}", 502)
+    raise e
+
+
+def _check_generation_backend(config) -> None:
+    if config.llm_backend == "gemini" and not config.gemini_api_key:
+        raise AskError("GEMINI_API_KEY not configured", 503)
+
+
 async def ask(
     nbm,
     question: str,
@@ -36,16 +69,16 @@ async def ask(
     embedder,
     filter: str | None = None,
     max_tiddlers: int = 100,
+    history: list[dict] | None = None,
 ) -> dict:
     """Answer a question about a notebook. Returns {answer, sources, truncated}.
 
     `max_tiddlers` bounds embedding-cache *misses* per request (cost control),
     not the candidate pool; it is clamped to >= 1 here because MCP arguments
     aren't range-validated and max_new <= 0 would skip every uncached tiddler
-    forever.
+    forever. `history` is prior chat turns [{role, content}].
     """
-    if config.llm_backend == "gemini" and not config.gemini_api_key:
-        raise AskError("GEMINI_API_KEY not configured", 503)
+    _check_generation_backend(config)
     tiddlers = await nbm.filter_tiddlers(filter or DEFAULT_FILTER, full=True)
     try:
         return await answer_question(
@@ -54,26 +87,46 @@ async def ask(
             embedder=embedder,
             cfg=config,
             max_embed=max(1, max_tiddlers),
+            history=history,
         )
-    except EmbeddingError as e:
-        raise AskError(str(e), 503) from e
-    except GenerationError as e:
-        raise AskError(str(e), 503) from e
-    except (httpx.ConnectError, httpx.TimeoutException) as e:
-        # Embedder httpx errors are wrapped in EmbeddingError and local-LLM
-        # ones in GenerationError, so anything reaching here came from the
-        # Gemini client's transport.
-        raise AskError(
-            "Cannot reach the AI model service — network issue toward Gemini. "
-            "Please try again.",
-            503,
-        ) from e
-    except genai_errors.ServerError as e:
-        raise AskError(
-            "The AI model is busy right now. Please try again in a moment.", 503
-        ) from e
-    except genai_errors.ClientError as e:
-        raise AskError(f"AI model error: {e.message}", 502) from e
+    except Exception as e:
+        raise _translate(e) from e
+
+
+async def ask_stream(
+    nbm,
+    question: str,
+    *,
+    config,
+    embedder,
+    filter: str | None = None,
+    max_tiddlers: int = 100,
+    history: list[dict] | None = None,
+):
+    """Streaming `ask`. Fetches candidates first (failures there raise AskError
+    before any bytes are sent), then returns an async generator of
+    (event, data) pairs: ("delta", {text}) fragments, one final ("done",
+    {answer, sources, truncated}) — or ("error", {message, status}) if a
+    backend fails after the stream has started."""
+    _check_generation_backend(config)
+    tiddlers = await nbm.filter_tiddlers(filter or DEFAULT_FILTER, full=True)
+
+    async def events():
+        try:
+            async for event in answer_question_stream(
+                question=question,
+                tiddlers=tiddlers,
+                embedder=embedder,
+                cfg=config,
+                max_embed=max(1, max_tiddlers),
+                history=history,
+            ):
+                yield event
+        except Exception as e:
+            err = _translate(e)
+            yield ("error", {"message": str(err), "status": err.status})
+
+    return events()
 
 
 async def related(
@@ -104,3 +157,87 @@ async def related(
     except EmbeddingError as e:
         raise AskError(str(e), 503) from e
     return {"related": items, "truncated": truncated}
+
+
+def _parse_tags(result: str) -> list[str]:
+    """One tag per model output line → clean tag list (bullets/quotes the
+    model sneaked in stripped, blanks dropped, capped at 5)."""
+    tags = []
+    for line in result.splitlines():
+        tag = line.strip().lstrip("-*#").strip().strip("\"'").strip()
+        if tag:
+            tags.append(tag)
+    return tags[:5]
+
+
+async def generate(
+    nbm,
+    title: str,
+    command: str,
+    *,
+    config,
+) -> dict:
+    """One-shot generation command over a single tiddler (summarize / tags /
+    title / tasks) — render → generate, no embedding round-trip. Returns
+    {command, title, result} plus `tags` (parsed list) for the tags command.
+    """
+    if command not in COMMANDS:
+        raise AskError(
+            f"Unknown command '{command}' — expected one of: "
+            f"{', '.join(sorted(COMMANDS))}",
+            400,
+        )
+    _check_generation_backend(config)
+    tiddler = await nbm.get_tiddler(title)
+    if tiddler is None:
+        raise AskError(f"Tiddler '{title}' not found", 404)
+
+    # Rendered plain text resolves transclusions/macros; fall back to the raw
+    # text when rendering yields nothing (e.g. a data tiddler).
+    text = (await nbm.render(title, mode="plain") or "").strip()
+    if not text:
+        text = tiddler.get("text", "").strip()
+    if not text:
+        raise AskError(f"Tiddler '{title}' has no text to work with", 422)
+
+    vocabulary = None
+    if command == "tags":
+        vocabulary = await nbm.filter_tiddlers("[tags[]]")
+
+    try:
+        result = await run_command(command, title, text, config, vocabulary)
+    except Exception as e:
+        raise _translate(e) from e
+
+    out = {"command": command, "title": title, "result": result}
+    if command == "tags":
+        out["tags"] = _parse_tags(result)
+    return out
+
+
+async def digest(
+    nbm,
+    *,
+    config,
+    filter: str | None = None,
+    title: str | None = None,
+    write: bool = True,
+) -> dict:
+    """Synthesize a what-changed digest and (by default) write it back as a
+    tiddler tagged `ai-digest`. Returns {written, title, sources, text} — or
+    {written: False, reason} when nothing changed in the period."""
+    _check_generation_backend(config)
+    tiddlers = await nbm.filter_tiddlers(filter or config.digest_filter, full=True)
+    tiddlers = [t for t in tiddlers if t.get("text", "").strip()]
+    if not tiddlers:
+        return {"written": False, "reason": "no recently modified notes"}
+
+    try:
+        text, sources = await ai_digest_text(tiddlers, config)
+    except Exception as e:
+        raise _translate(e) from e
+
+    digest_title = title or f"AI Digest {date.today().isoformat()}"
+    if write:
+        await nbm.put_tiddler(digest_title, {"tags": DIGEST_TAG}, text)
+    return {"written": write, "title": digest_title, "sources": sources, "text": text}

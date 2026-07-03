@@ -13,6 +13,7 @@
 </$list>
 
 <$list filter="[<currentTiddler>!has[draft.of]!is[system]!is[missing]]" variable="ignore">
+
 <$set name="relatedState" value={{{ [[$:/temp/ai-gateway/related/]addsuffix<currentTiddler>] }}}>
 <div class="ai-gw-related">
 <$reveal state="$:/state/ai-gateway/related-loading" type="match" text=<<currentTiddler>>>
@@ -42,4 +43,75 @@
 </$reveal>
 </div>
 </$set>
+
+<$set name="tagsState" value={{{ [[$:/temp/ai-gateway/tags/]addsuffix<currentTiddler>] }}}>
+<div class="ai-gw-related">
+<$reveal state="$:/state/ai-gateway/tags-loading" type="match" text=<<currentTiddler>>>
+<span class="ai-gw-related-loading"><span class="ai-gw-spinner"></span> Suggesting tags…</span>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/tags-loading" type="nomatch" text=<<currentTiddler>>>
+<$list filter="[<tagsState>is[missing]]" variable="ignore-missing">
+<$button class="tc-btn-invisible ai-gw-related-btn" tooltip="Suggest tags for this note via the AI gateway">
+<$action-sendmessage $message="tm-suggest-tags" $param=<<currentTiddler>>/>
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Suggest tags
+</$button>
+</$list>
+<$list filter="[<tagsState>!is[missing]]" variable="ignore-present">
+<div class="ai-gw-related-box">
+<div class="ai-gw-related-head">
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Suggested tags
+<$button class="tc-btn-invisible ai-gw-related-refresh" tooltip="Refresh suggestions">
+<$action-sendmessage $message="tm-suggest-tags" $param=<<currentTiddler>>/>↻
+</$button>
+<$button class="tc-btn-invisible ai-gw-related-clear" tooltip="Hide suggestions">
+<$action-deletetiddler $filter="[<tagsState>]"/>×
+</$button>
+</div>
+<$list filter="[<tagsState>has[error]]" variable="ignore-error">
+//<$view tiddler=<<tagsState>> field="error"/>//
+</$list>
+<$list filter="[<tagsState>!has[error]]" variable="ignore-ok">
+<$list filter="[<tagsState>get[text]enlist-input[]] -[<currentTiddler>tags[]]" variable="suggestedTag" emptyMessage="//Nothing new to suggest.//">
+<$button class="ai-gw-tag-suggestion" tooltip="Add this tag to the note">
+<$action-listops $tiddler=<<currentTiddler>> $tags="+[<suggestedTag>]"/>
++ <<suggestedTag>>
+</$button>
+</$list>
+</$list>
+</div>
+</$list>
+</$reveal>
+</div>
+</$set>
+
+<$set name="tasksState" value={{{ [[$:/temp/ai-gateway/tasks/]addsuffix<currentTiddler>] }}}>
+<div class="ai-gw-related">
+<$reveal state="$:/state/ai-gateway/tasks-loading" type="match" text=<<currentTiddler>>>
+<span class="ai-gw-related-loading"><span class="ai-gw-spinner"></span> Extracting tasks…</span>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/tasks-loading" type="nomatch" text=<<currentTiddler>>>
+<$list filter="[<tasksState>is[missing]]" variable="ignore-missing">
+<$button class="tc-btn-invisible ai-gw-related-btn" tooltip="Extract action items from this note via the AI gateway">
+<$action-sendmessage $message="tm-extract-tasks" $param=<<currentTiddler>>/>
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Extract tasks
+</$button>
+</$list>
+<$list filter="[<tasksState>!is[missing]]" variable="ignore-present">
+<div class="ai-gw-related-box">
+<div class="ai-gw-related-head">
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Tasks
+<$button class="tc-btn-invisible ai-gw-related-refresh" tooltip="Refresh tasks">
+<$action-sendmessage $message="tm-extract-tasks" $param=<<currentTiddler>>/>↻
+</$button>
+<$button class="tc-btn-invisible ai-gw-related-clear" tooltip="Hide tasks">
+<$action-deletetiddler $filter="[<tasksState>]"/>×
+</$button>
+</div>
+<$transclude tiddler=<<tasksState>> mode="block"/>
+</div>
+</$list>
+</$reveal>
+</div>
+</$set>
+
 </$list>

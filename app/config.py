@@ -2,6 +2,13 @@ import os
 import yaml
 from dataclasses import dataclass, field
 
+# What "changed recently" means for scheduled digests: user tiddlers touched in
+# the last week, newest first, excluding earlier digests so they don't feed
+# themselves.
+DIGEST_DEFAULT_FILTER = (
+    "[!is[system]!tag[ai-digest]has[text]days:modified[-7]sort[-modified]limit[20]]"
+)
+
 
 @dataclass
 class UnlockConfig:
@@ -36,6 +43,12 @@ class AppConfig:
     # Generation backend: "gemini" (default) or "ollama" for fully-local asks.
     llm_backend: str = "gemini"
     ollama_llm_model: str = "llama3.2"
+    # Scheduled synthesis digest: daily "what changed" tiddler written into
+    # `digest_notebook` at `digest_hour_utc`. Empty notebook = scheduler off
+    # (the POST /notebooks/{nb}/digest route works regardless).
+    digest_notebook: str = ""
+    digest_hour_utc: int = 6
+    digest_filter: str = DIGEST_DEFAULT_FILTER
 
 
 def load_config() -> AppConfig:
@@ -74,4 +87,7 @@ def load_config() -> AppConfig:
         rag_top_k=int(os.environ.get("RAG_TOP_K", "8")),
         llm_backend=os.environ.get("LLM_BACKEND", "gemini"),
         ollama_llm_model=os.environ.get("OLLAMA_LLM_MODEL", "llama3.2"),
+        digest_notebook=os.environ.get("DIGEST_NOTEBOOK", ""),
+        digest_hour_utc=int(os.environ.get("DIGEST_HOUR_UTC", "6")),
+        digest_filter=os.environ.get("DIGEST_FILTER", DIGEST_DEFAULT_FILTER),
     )

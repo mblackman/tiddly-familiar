@@ -38,6 +38,9 @@ class FakeNotebook:
         self.store.pop(title, None)
         return True
 
+    async def render(self, title, mode="plain"):
+        return self.store.get(title, {}).get("text", "")
+
 
 class FakeManager:
     def __init__(self, notebooks):
@@ -159,6 +162,98 @@ def test_related_missing_title_is_404(client):
     c, _ = client
     resp = c.get("/notebooks/dev/related", params={"title": "Nope"}, headers=AUTH)
     assert resp.status_code == 404
+
+
+def _sse_events(body: str) -> list[tuple[str, dict]]:
+    import json
+
+    events = []
+    for frame in body.strip().split("\n\n"):
+        lines = dict(line.split(": ", 1) for line in frame.splitlines())
+        events.append((lines["event"], json.loads(lines["data"])))
+    return events
+
+
+def test_ask_stream_sse(client, monkeypatch):
+    async def fake_stream(**kw):
+        assert kw["history"] == [{"role": "user", "content": "before"}]
+        yield ("delta", {"text": "Hi "})
+        yield ("delta", {"text": "there"})
+        yield ("done", {"answer": "Hi there", "sources": [], "truncated": False})
+
+    monkeypatch.setattr(
+        service, "answer_question_stream", lambda **kw: fake_stream(**kw)
+    )
+    c, _ = client
+    resp = c.post(
+        "/notebooks/dev/ask/stream",
+        json={
+            "question": "why?",
+            "history": [{"role": "user", "content": "before"}],
+        },
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    events = _sse_events(resp.text)
+    assert [name for name, _ in events] == ["delta", "delta", "done"]
+    assert events[-1][1]["answer"] == "Hi there"
+
+
+def test_ask_stream_bad_history_role_is_422(client):
+    c, _ = client
+    resp = c.post(
+        "/notebooks/dev/ask/stream",
+        json={"question": "q", "history": [{"role": "system", "content": "x"}]},
+        headers=AUTH,
+    )
+    assert resp.status_code == 422
+
+
+def test_generate_route(client, monkeypatch):
+    c, _ = client
+
+    async def fake_run_command(command, title, text, cfg, vocabulary=None):
+        assert (command, title, text) == ("summarize", "Existing", "hello")
+        return "a summary"
+
+    monkeypatch.setattr(service, "run_command", fake_run_command)
+    resp = c.post(
+        "/notebooks/dev/generate",
+        json={"title": "Existing", "command": "summarize"},
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "command": "summarize",
+        "title": "Existing",
+        "result": "a summary",
+    }
+
+
+def test_generate_unknown_command_is_400(client):
+    c, _ = client
+    resp = c.post(
+        "/notebooks/dev/generate",
+        json={"title": "Existing", "command": "translate"},
+        headers=AUTH,
+    )
+    assert resp.status_code == 400
+
+
+def test_digest_route_writes_tiddler(client, monkeypatch):
+    c, nb = client
+
+    async def fake_digest_text(tiddlers, cfg, period="the last 7 days"):
+        return "!! What changed\n* [[Existing]]", ["Existing"]
+
+    monkeypatch.setattr(service, "ai_digest_text", fake_digest_text)
+    resp = c.post("/notebooks/dev/digest", headers=AUTH)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["written"] is True
+    assert data["title"] in nb.store
+    assert nb.store[data["title"]]["fields"] == {"tags": "ai-digest"}
 
 
 def test_ask_unexpected_error_is_500_with_cors(client, monkeypatch):

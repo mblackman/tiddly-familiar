@@ -1,12 +1,16 @@
+import asyncio
+import json
+import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
 from urllib.parse import parse_qs
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
@@ -17,9 +21,34 @@ from .manager import AppManager
 from .mcp_server import init as mcp_init
 from .mcp_server import mcp
 
+logger = logging.getLogger(__name__)
+
 _config: AppConfig | None = None
 _manager: AppManager | None = None
 _embedder: Embedder | None = None
+
+
+async def _digest_scheduler():
+    """Daily synthesis digest: sleep until the configured UTC hour, write a
+    what-changed tiddler into the digest notebook, repeat. Failures are logged
+    and retried at the next tick — a flaky backend must not kill the loop."""
+    while True:
+        now = datetime.now(timezone.utc)
+        target = now.replace(
+            hour=_config.digest_hour_utc, minute=0, second=0, microsecond=0
+        )
+        if target <= now:
+            target += timedelta(days=1)
+        await asyncio.sleep((target - now).total_seconds())
+        try:
+            nbm = _manager.notebook(_config.digest_notebook)
+            result = await service.digest(nbm, config=_config)
+            if result["written"]:
+                logger.info("Scheduled digest written: %s", result["title"])
+            else:
+                logger.info("Scheduled digest skipped: %s", result["reason"])
+        except Exception:
+            logger.exception("Scheduled digest failed")
 
 
 @asynccontextmanager
@@ -35,7 +64,23 @@ async def lifespan(app: FastAPI):
         cache_path=os.path.join(_config.profiles_dir, "embeddings.sqlite3"),
     )
     mcp_init(_config, _manager, _embedder)
+    digest_task = None
+    if _config.digest_notebook:
+        if _config.digest_notebook in _config.notebooks:
+            logger.info(
+                "Digest scheduler on: notebook '%s' daily at %02d:00 UTC",
+                _config.digest_notebook,
+                _config.digest_hour_utc,
+            )
+            digest_task = asyncio.create_task(_digest_scheduler())
+        else:
+            logger.error(
+                "DIGEST_NOTEBOOK '%s' is not a configured notebook — scheduler off",
+                _config.digest_notebook,
+            )
     yield
+    if digest_task:
+        digest_task.cancel()
     await _embedder.aclose()
     await _manager.stop()
 
@@ -127,12 +172,30 @@ class RenderBody(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class AskBody(BaseModel):
     question: str
     filter: Optional[str] = None
     # Bounds embedding-cache *misses* per request (cost control), not the
     # candidate pool — every filter match participates in ranking once cached.
     max_tiddlers: int = Field(100, ge=1, le=1000)
+    # Prior chat turns, oldest first. Trimmed server-side to a turn/char budget.
+    history: list[ChatTurn] = Field(default_factory=list)
+
+
+class GenerateBody(BaseModel):
+    title: str
+    command: str
+
+
+class DigestBody(BaseModel):
+    filter: Optional[str] = None
+    title: Optional[str] = None
+    write: bool = True
 
 
 # --- routes ---
@@ -243,10 +306,79 @@ async def ask(nb: str, body: AskBody):
             embedder=_embedder,
             filter=body.filter,
             max_tiddlers=body.max_tiddlers,
+            history=[t.model_dump() for t in body.history],
         )
     except service.AskError as e:
         raise HTTPException(status_code=e.status, detail=str(e))
     except Exception as e:
         # Re-raise as HTTPException so it flows through CORSMiddleware —
         # unhandled exceptions bypass it and the browser sees a CORS error.
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/notebooks/{nb}/ask/stream", dependencies=[Depends(require_auth)])
+async def ask_stream(nb: str, body: AskBody):
+    """SSE variant of /ask: `delta` events carry answer fragments, one final
+    `done` event carries {answer, sources, truncated}. Backend failures after
+    the stream has started arrive as an `error` event (the 200 is already on
+    the wire by then); failures before that are normal HTTP errors."""
+    nbm = _get_notebook(nb)
+    try:
+        events = await service.ask_stream(
+            nbm,
+            body.question,
+            config=_config,
+            embedder=_embedder,
+            filter=body.filter,
+            max_tiddlers=body.max_tiddlers,
+            history=[t.model_dump() for t in body.history],
+        )
+    except service.AskError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    async def sse():
+        async for name, data in events:
+            yield f"event: {name}\ndata: {json.dumps(data)}\n\n"
+
+    return StreamingResponse(
+        sse(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/notebooks/{nb}/generate", dependencies=[Depends(require_auth)])
+async def generate(nb: str, body: GenerateBody):
+    """One-shot generation command over a single tiddler (summarize / tags /
+    title / tasks) — render → generate, no embedding round-trip."""
+    nbm = _get_notebook(nb)
+    try:
+        return await service.generate(
+            nbm, body.title, body.command, config=_config
+        )
+    except service.AskError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/notebooks/{nb}/digest", dependencies=[Depends(require_auth)])
+async def digest(nb: str, body: DigestBody | None = None):
+    """Synthesize a what-changed digest now (same code path the scheduler
+    runs). Body is optional: {filter, title, write} override the defaults."""
+    body = body or DigestBody()
+    nbm = _get_notebook(nb)
+    try:
+        return await service.digest(
+            nbm,
+            config=_config,
+            filter=body.filter,
+            title=body.title,
+            write=body.write,
+        )
+    except service.AskError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
