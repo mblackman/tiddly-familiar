@@ -14,4 +14,5 @@ Set the following tiddlers to point at your gateway instance:
 !! Features
 
 * ''Ask AI'' — sidebar panel with a question field and optional TiddlyWiki filter; renders the answer with a collapsible source list.
+* ''Saved chats'' — ''Save chat'' turns the sidebar conversation into a regular note tagged `ai-chat` (one tiddler per turn under `<note>/turn/`), so it syncs and survives reload. While saved, new turns keep landing in the note; ''Continue this chat'' on the note re-binds the sidebar to it later. ''New chat'' starts fresh without touching saved notes.
 * ''Summarize'' — toolbar button on any tiddler; calls the gateway with the tiddler as context and writes the result to a `summary` field, displayed above the body.

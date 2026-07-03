@@ -3,10 +3,11 @@ import yaml
 from dataclasses import dataclass, field
 
 # What "changed recently" means for scheduled digests: user tiddlers touched in
-# the last week, newest first, excluding earlier digests so they don't feed
-# themselves.
+# the last week, newest first, excluding AI output (earlier digests, saved chat
+# notes and their turns) so generated text doesn't feed itself.
 DIGEST_DEFAULT_FILTER = (
-    "[!is[system]!tag[ai-digest]has[text]days:modified[-7]sort[-modified]limit[20]]"
+    "[!is[system]!tag[ai-digest]!tag[ai-chat]!tag[ai-chat-turn]"
+    "has[text]days:modified[-7]sort[-modified]limit[20]]"
 )
 
 

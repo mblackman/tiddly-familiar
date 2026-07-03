@@ -1,3 +1,31 @@
+<$list filter="[all[current]!has[draft.of]tag[ai-chat]]" variable="ignore-chat-note">
+<$vars turnPrefix={{{ [<currentTiddler>addsuffix[/turn/]] }}}>
+<div class="ai-gw-chat ai-gw-chat-note">
+<$list filter="[prefix<turnPrefix>sort[title]]" variable="turn" emptyMessage="//This chat has no turns.//">
+<$vars turnClass={{{ [<turn>get[role]match[user]then[ai-gw-turn ai-gw-turn-user]else[ai-gw-turn ai-gw-turn-ai]] }}}>
+<div class=<<turnClass>>>
+<$transclude tiddler=<<turn>> mode="block"/>
+<$list filter="[<turn>has[sources]]" variable="ignore-sources">
+<div class="ai-gw-turn-sources">Sources: <$list filter="[<turn>get[sources]enlist-input[]]" variable="src"><$link to=<<src>>><$text text=<<src>>/></$link> </$list></div>
+</$list>
+</div>
+</$vars>
+</$list>
+</div>
+<div class="ai-gw-chat-actions">
+<$reveal state="$:/state/ai-gateway/chat-note" type="match" text=<<currentTiddler>>>
+<span class="ai-gw-chat-bound">Active in the Ask AI panel — new turns land here</span>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/chat-note" type="nomatch" text=<<currentTiddler>>>
+<$button class="ai-gw-preset" tooltip="Continue this conversation in the Ask AI sidebar">
+<$action-sendmessage $message="tm-resume-chat" $param=<<currentTiddler>>/>
+Continue this chat
+</$button>
+</$reveal>
+</div>
+</$vars>
+</$list>
+
 <$reveal state="$:/state/ai-gateway/summarizing" type="match" text=<<currentTiddler>>>
 <div class="ai-gw-summarizing"><span class="ai-gw-spinner"></span> Summarizing…</div>
 </$reveal>

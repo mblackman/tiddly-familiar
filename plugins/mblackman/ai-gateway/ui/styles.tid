@@ -343,6 +343,24 @@
   margin-top: 0.6em;
 }
 
+.ai-gw-chat-note {
+  margin-bottom: 0.5em;
+}
+
+.ai-gw-chat-bound {
+  display: block;
+  font-size: 0.78em;
+  color: <<colour foreground>>;
+  opacity: 0.65;
+  margin-top: 0.75em;
+}
+
+.ai-gw-turn-sources {
+  font-size: 0.8em;
+  opacity: 0.7;
+  margin-top: 0.4em;
+}
+
 .ai-gw-tag-suggestion {
   background: <<colour tiddler-background>>;
   color: <<colour primary>>;

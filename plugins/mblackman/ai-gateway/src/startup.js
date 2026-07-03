@@ -26,6 +26,9 @@ exports.startup = function() {
     var apiKey   = cfg("APIKey");
 
     var CHAT_PREFIX = "$:/temp/ai-gateway/chat/";
+    var CHAT_NOTE_STATE = "$:/state/ai-gateway/chat-note";
+    var CHAT_TAG = "ai-chat";
+    var CHAT_TURN_TAG = "ai-chat-turn";
     var MAX_TURNS = 10;
     var FLUSH_MS = 120; // throttle transcript re-renders while streaming
 
@@ -49,10 +52,29 @@ exports.startup = function() {
       });
     }
 
-    // --- rolling chat history: one tiddler per turn under CHAT_PREFIX ---
+    // --- chat transcript: one tiddler per turn ---
+    // Unsaved chats live under the volatile CHAT_PREFIX ($:/temp/ is never
+    // synced). "Save chat" moves the turns under a real note ("<note>/turn/")
+    // and binds the panel to it via CHAT_NOTE_STATE, so every later turn is
+    // written as a synced tiddler too.
 
-    function chatTurnTitles() {
-      return $tw.wiki.filterTiddlers("[prefix[" + CHAT_PREFIX + "]sort[title]]");
+    function boundChatNote() {
+      var title = ($tw.wiki.getTiddlerText(CHAT_NOTE_STATE) || "").trim();
+      return title && $tw.wiki.tiddlerExists(title) ? title : null;
+    }
+
+    function chatPrefix() {
+      var note = boundChatNote();
+      return note ? note + "/turn/" : CHAT_PREFIX;
+    }
+
+    function padTurn(n) {
+      return ("000000" + n).slice(-6);
+    }
+
+    function chatTurnTitles(prefix) {
+      prefix = prefix || chatPrefix();
+      return $tw.wiki.filterTiddlers("[prefix[" + prefix + "]sort[title]]");
     }
 
     function chatHistory() {
@@ -62,25 +84,52 @@ exports.startup = function() {
           role: t.fields.role === "assistant" ? "assistant" : "user",
           content: t.fields.text || ""
         };
-      });
+      }).slice(-MAX_TURNS);
+    }
+
+    function turnFields(role, content, sources) {
+      var fields = {text: content, role: role};
+      if (role === "assistant") fields.type = "text/markdown";
+      if (sources && sources.length) fields.sources = $tw.utils.stringifyList(sources);
+      return fields;
     }
 
     function appendTurn(role, content, sources) {
-      var titles = chatTurnTitles();
+      var note = boundChatNote();
+      var prefix = note ? note + "/turn/" : CHAT_PREFIX;
+      var titles = chatTurnTitles(prefix);
       var last = titles.length
-        ? parseInt(titles[titles.length - 1].slice(CHAT_PREFIX.length), 10) : 0;
-      var fields = {
-        title: CHAT_PREFIX + ("000000" + (last + 1)).slice(-6),
-        text: content,
-        role: role
-      };
-      if (role === "assistant") fields.type = "text/markdown";
-      if (sources && sources.length) fields.sources = $tw.utils.stringifyList(sources);
+        ? parseInt(titles[titles.length - 1].slice(prefix.length), 10) : 0;
+      var fields = turnFields(role, content, sources);
+      fields.title = prefix + padTurn(last + 1);
+      if (note) {
+        fields.tags = [CHAT_TURN_TAG];
+        $tw.wiki.addTiddler(new $tw.Tiddler(
+          $tw.wiki.getCreationFields(), fields, $tw.wiki.getModificationFields()));
+        // bump the note itself so the conversation surfaces in "Recent"
+        $tw.wiki.addTiddler(new $tw.Tiddler(
+          $tw.wiki.getTiddler(note), $tw.wiki.getModificationFields()));
+        return;
+      }
       $tw.wiki.addTiddler(new $tw.Tiddler(fields));
-      titles = chatTurnTitles();
+      titles = chatTurnTitles(prefix);
       while (titles.length > MAX_TURNS) {
         $tw.wiki.deleteTiddler(titles.shift());
       }
+    }
+
+    function chatNoteTitleFor(firstQuestion) {
+      // keep titles filter-safe: they are spliced into [prefix[...]] runs
+      var slug = (firstQuestion || "").replace(/[\[\]{}|<>]/g, " ")
+        .replace(/\s+/g, " ").trim().slice(0, 40).trim();
+      if (!slug) slug = $tw.utils.formatDateString(new Date(), "YYYY-0MM-0DD 0hh:0mm");
+      var base = "AI Chat: " + slug;
+      var title = base, n = 1;
+      while ($tw.wiki.tiddlerExists(title)) {
+        n += 1;
+        title = base + " (" + n + ")";
+      }
+      return title;
     }
 
     $tw.TiddlyPWAGateway = {
@@ -248,6 +297,53 @@ exports.startup = function() {
         setState("$:/state/ai-gateway/answer",  "//" + msg + "//", "text/vnd.tiddlywiki");
         setState("$:/state/ai-gateway/asking",  "no");
       });
+    });
+
+    // Persist the current temp transcript as a real note tagged CHAT_TAG:
+    // turns move to "<note>/turn/NNNNNN" (synced tiddlers) and the panel
+    // binds to the note so the rest of the conversation persists too.
+    $tw.rootWidget.addEventListener("tm-save-chat", function() {
+      if (boundChatNote()) return; // already persisting into a note
+      var titles = chatTurnTitles(CHAT_PREFIX);
+      if (!titles.length) return;
+      var firstQuestion = "";
+      titles.some(function(t) {
+        var tid = $tw.wiki.getTiddler(t);
+        if (tid.fields.role !== "assistant") {
+          firstQuestion = tid.fields.text || "";
+          return true;
+        }
+        return false;
+      });
+      var noteTitle = chatNoteTitleFor(firstQuestion);
+      $tw.wiki.addTiddler(new $tw.Tiddler($tw.wiki.getCreationFields(), {
+        title: noteTitle,
+        tags: [CHAT_TAG],
+        text: ""
+      }, $tw.wiki.getModificationFields()));
+      titles.forEach(function(t, i) {
+        var tid = $tw.wiki.getTiddler(t);
+        $tw.wiki.addTiddler(new $tw.Tiddler(
+          $tw.wiki.getCreationFields(), tid.fields, {
+            title: noteTitle + "/turn/" + padTurn(i + 1),
+            tags: [CHAT_TURN_TAG]
+          }, $tw.wiki.getModificationFields()));
+        $tw.wiki.deleteTiddler(t);
+      });
+      setState(CHAT_NOTE_STATE, noteTitle);
+      dbg("chat saved to " + JSON.stringify(noteTitle) + " (" + titles.length + " turns)");
+    });
+
+    // Bind the panel to a previously saved chat note (its turns become the
+    // transcript + history). Discards any unsaved temp transcript.
+    $tw.rootWidget.addEventListener("tm-resume-chat", function(event) {
+      var title = event.param || "";
+      if (!title || !$tw.wiki.tiddlerExists(title)) return;
+      chatTurnTitles(CHAT_PREFIX).forEach(function(t) { $tw.wiki.deleteTiddler(t); });
+      setState(CHAT_NOTE_STATE, title);
+      setState("$:/state/ai-gateway/answer", "");
+      setState("$:/state/ai-gateway/sources", "");
+      dbg("resumed chat " + JSON.stringify(title));
     });
 
     $tw.rootWidget.addEventListener("tm-summarize-tiddler", function(event) {

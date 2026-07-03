@@ -101,6 +101,68 @@ async def main():
         print("follow-up answer mentions caddy:", "addy" in turns[-1])
         assert len(turns) == 4, f"expected 4 turns, got {len(turns)}"
 
+        # --- save chat: transcript becomes a real note + turn tiddlers ---
+        await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-save-chat'})")
+        note = await get_text(page, "$:/state/ai-gateway/chat-note")
+        print("chat saved to note:", repr(note))
+        assert note.startswith("AI Chat: "), "chat-note state not set after save"
+        temp_left = await page.evaluate(
+            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/chat/]]').length"
+        )
+        assert temp_left == 0, f"{temp_left} temp turns left after save"
+        saved = await page.evaluate(
+            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]sort[title]]')"
+            ".map(t => { var f = $tw.wiki.getTiddler(t).fields; "
+            "return {role: f.role, tags: (f.tags||[]).join(' ')}; })",
+            note,
+        )
+        print("saved turns:", json.dumps(saved))
+        assert len(saved) == 4 and all(t["tags"] == "ai-chat-turn" for t in saved), "bad saved turns"
+        note_tags = await page.evaluate(
+            "(n) => ($tw.wiki.getTiddler(n).fields.tags || []).join(' ')", note
+        )
+        assert "ai-chat" in note_tags, "chat note not tagged ai-chat"
+
+        # --- next turn lands in the note while bound ---
+        await set_tiddler(page, "$:/state/ai-gateway/question", "Summarize that in one sentence.")
+        await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
+        for _ in range(120):
+            await asyncio.sleep(0.5)
+            if await get_text(page, "$:/state/ai-gateway/asking") == "no":
+                break
+        counts = await page.evaluate(
+            "(n) => [$tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]]').length,"
+            " $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/chat/]]').length]",
+            note,
+        )
+        print("turns in note / temp after bound ask:", counts)
+        assert counts == [6, 0], f"bound ask went to the wrong place: {counts}"
+
+        # --- persistence: turns survive a full reload; resume re-binds ---
+        await asyncio.sleep(4)  # let the syncer push the note + turns
+        await page.goto(WIKI, wait_until="load")
+        await wait_ready(page)
+        await asyncio.sleep(2)
+        persisted = await page.evaluate(
+            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]sort[title]]')"
+            ".map(t => $tw.wiki.getTiddler(t).fields.role)",
+            note,
+        )
+        print("persisted roles after reload:", persisted)
+        assert len(persisted) == 6, f"expected 6 persisted turns, got {len(persisted)}"
+        await page.evaluate(
+            "(n) => $tw.rootWidget.dispatchEvent({type: 'tm-resume-chat', param: n})", note
+        )
+        assert await get_text(page, "$:/state/ai-gateway/chat-note") == note, "resume did not re-bind"
+        print("resume re-bound the panel to the note")
+
+        # Remove the (real, synced) chat note + turns so reruns start clean.
+        await page.evaluate(
+            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]] [[' + n + ']]')"
+            ".forEach(t => $tw.wiki.deleteTiddler(t))",
+            note,
+        )
+
         # --- suggest tags ---
         await page.evaluate(
             "() => $tw.rootWidget.dispatchEvent({type: 'tm-suggest-tags', param: 'Caddy'})"

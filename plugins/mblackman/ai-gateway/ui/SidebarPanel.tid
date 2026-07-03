@@ -1,8 +1,23 @@
 \define ai-gw-clear-chat()
 <$action-deletetiddler $filter="[prefix[$:/temp/ai-gateway/chat/]]"/>
+<$action-setfield $tiddler="$:/state/ai-gateway/chat-note" text=""/>
 <$action-setfield $tiddler="$:/state/ai-gateway/answer" text=""/>
 <$action-setfield $tiddler="$:/state/ai-gateway/sources" text=""/>
 <$action-setfield $tiddler="$:/state/ai-gateway/sources-open" text="no"/>
+\end
+
+\define ai-gw-transcript(prefix)
+<$list filter="[prefix[$prefix$]limit[1]]" variable="ignore-has-chat">
+<div class="ai-gw-chat">
+<$list filter="[prefix[$prefix$]sort[title]]" variable="turn">
+<$vars turnClass={{{ [<turn>get[role]match[user]then[ai-gw-turn ai-gw-turn-user]else[ai-gw-turn ai-gw-turn-ai]] }}}>
+<div class=<<turnClass>>>
+<$transclude tiddler=<<turn>> mode="block"/>
+</div>
+</$vars>
+</$list>
+</div>
+</$list>
 \end
 
 <div class="ai-gw-panel">
@@ -43,17 +58,13 @@ its tag
 </$button>
 </$reveal>
 
-<$list filter="[prefix[$:/temp/ai-gateway/chat/]limit[1]]" variable="ignore-has-chat">
-<div class="ai-gw-chat">
-<$list filter="[prefix[$:/temp/ai-gateway/chat/]sort[title]]" variable="turn">
-<$vars turnClass={{{ [<turn>get[role]match[user]then[ai-gw-turn ai-gw-turn-user]else[ai-gw-turn ai-gw-turn-ai]] }}}>
-<div class=<<turnClass>>>
-<$transclude tiddler=<<turn>> mode="block"/>
-</div>
-</$vars>
-</$list>
-</div>
-</$list>
+<$reveal state="$:/state/ai-gateway/chat-note" type="match" text="">
+<<ai-gw-transcript "$:/temp/ai-gateway/chat/">>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/chat-note" type="nomatch" text="">
+<div class="ai-gw-chat-bound">Saving to <$link to={{$:/state/ai-gateway/chat-note}}><$text text={{$:/state/ai-gateway/chat-note}}/></$link></div>
+<$macrocall $name="ai-gw-transcript" prefix={{{ [{$:/state/ai-gateway/chat-note}addsuffix[/turn/]] }}}/>
+</$reveal>
 
 <$reveal state="$:/state/ai-gateway/asking" type="match" text="yes">
 <$reveal state="$:/state/ai-gateway/answer" type="nomatch" text="">
@@ -88,13 +99,27 @@ its tag
 </div>
 </$reveal>
 
+<$reveal state="$:/state/ai-gateway/chat-note" type="match" text="">
 <$list filter="[prefix[$:/temp/ai-gateway/chat/]limit[1]]" variable="ignore-clear">
 <div class="ai-gw-chat-actions">
+<$button class="ai-gw-preset" tooltip="Save this conversation as a note so it survives reload and keeps growing">
+<$action-sendmessage $message="tm-save-chat"/>
+Save chat
+</$button>
 <$button class="ai-gw-preset" tooltip="Forget this conversation and start over">
 <<ai-gw-clear-chat>>
 New chat
 </$button>
 </div>
 </$list>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/chat-note" type="nomatch" text="">
+<div class="ai-gw-chat-actions">
+<$button class="ai-gw-preset" tooltip="Start a new conversation (the saved note keeps this one)">
+<<ai-gw-clear-chat>>
+New chat
+</$button>
+</div>
+</$reveal>
 
 </div>
