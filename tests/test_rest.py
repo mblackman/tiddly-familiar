@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app import main, service
 from app.config import AppConfig
 from app.embeddings import EmbeddingError
+from app.note_cache import NoteCache, canonical_hash
 
 API_KEY = "test-key"
 AUTH = {"X-API-Key": API_KEY}
@@ -62,6 +63,7 @@ def client(monkeypatch):
     monkeypatch.setattr(main, "_config", cfg)
     monkeypatch.setattr(main, "_manager", FakeManager({"dev": nb}))
     monkeypatch.setattr(main, "_embedder", object())
+    monkeypatch.setattr(main, "_note_cache", NoteCache(":memory:"))
     # TestClient outside a `with` block does not run the lifespan.
     return TestClient(main.app, raise_server_exceptions=False), nb
 
@@ -254,6 +256,188 @@ def test_digest_route_writes_tiddler(client, monkeypatch):
     assert data["written"] is True
     assert data["title"] in nb.store
     assert nb.store[data["title"]]["fields"] == {"tags": "ai-digest"}
+
+
+# --- client-supplied-content routes (local mode) ---
+
+
+ZEBRA = {"title": "Zebra", "text": "A zebra is a striped horse.", "fields": {}}
+ZEBRA_HASH = canonical_hash("Zebra", "A zebra is a striped horse.", "")
+
+
+def test_client_ask_works_without_any_notebook(client, monkeypatch):
+    """The whole point of local mode: no manager, no configured notebook."""
+    c, _ = client
+    monkeypatch.setattr(main, "_manager", None)
+
+    async def fake_answer_question(**kw):
+        assert [t["title"] for t in kw["tiddlers"]] == ["Zebra"]
+        return {"answer": "stripes", "sources": ["Zebra"], "truncated": False}
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    resp = c.post(
+        "/ask", json={"question": "what is a zebra?", "tiddlers": [ZEBRA]}, headers=AUTH
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["answer"] == "stripes"
+    assert data["cache"] == {"hits": 0, "misses": 1}
+
+
+def test_client_ask_cache_flow(client, monkeypatch):
+    """Full send → check reports present → hash-only ref resolves from cache."""
+    c, _ = client
+
+    async def fake_answer_question(**kw):
+        return {
+            "answer": "ok",
+            "sources": [t["title"] for t in kw["tiddlers"]],
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    first = c.post("/ask", json={"question": "q", "tiddlers": [ZEBRA]}, headers=AUTH)
+    assert first.status_code == 200
+
+    check = c.post("/notes/check", json={"hashes": [ZEBRA_HASH, "0" * 64]}, headers=AUTH)
+    assert check.status_code == 200
+    assert check.json() == {"missing": ["0" * 64]}
+
+    second = c.post(
+        "/ask",
+        json={"question": "q", "tiddlers": [{"hash": ZEBRA_HASH}]},
+        headers=AUTH,
+    )
+    assert second.status_code == 200
+    data = second.json()
+    assert data["sources"] == ["Zebra"]
+    assert data["cache"] == {"hits": 1, "misses": 0}
+
+
+def test_client_ask_unknown_ref_is_409_with_missing(client):
+    c, _ = client
+    resp = c.post(
+        "/ask", json={"question": "q", "tiddlers": [{"hash": "f" * 64}]}, headers=AUTH
+    )
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == {"missing": ["f" * 64]}
+
+
+def test_client_ask_stream_sse(client, monkeypatch):
+    async def fake_stream(**kw):
+        assert [t["title"] for t in kw["tiddlers"]] == ["Zebra"]
+        yield ("delta", {"text": "Hi "})
+        yield ("delta", {"text": "there"})
+        yield ("done", {"answer": "Hi there", "sources": [], "truncated": False})
+
+    monkeypatch.setattr(
+        service, "answer_question_stream", lambda **kw: fake_stream(**kw)
+    )
+    c, _ = client
+    resp = c.post(
+        "/ask/stream",
+        json={"question": "why?", "tiddlers": [ZEBRA]},
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    events = _sse_events(resp.text)
+    assert [name for name, _ in events] == ["delta", "delta", "done"]
+    assert events[-1][1]["answer"] == "Hi there"
+    # done payload carries the cache stats the verify script asserts on.
+    assert events[-1][1]["cache"] == {"hits": 0, "misses": 1}
+
+
+def test_client_related(client, monkeypatch):
+    async def fake_related(target, tiddlers, embedder, top_k, max_embed=None):
+        assert target["title"] == "Zebra"
+        assert [t["title"] for t in tiddlers] == ["Okapi"]
+        return [{"title": "Okapi", "score": 0.8}], False
+
+    monkeypatch.setattr(service, "ai_related", fake_related)
+    c, _ = client
+    resp = c.post(
+        "/related",
+        json={
+            "target": ZEBRA,
+            "tiddlers": [{"title": "Okapi", "text": "forest giraffe", "fields": {}}],
+            "k": 3,
+        },
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["related"] == [{"title": "Okapi", "score": 0.8}]
+    assert data["cache"] == {"hits": 0, "misses": 1}
+
+
+def test_client_related_ref_target_is_422(client):
+    c, _ = client
+    resp = c.post(
+        "/related",
+        json={"target": {"hash": "a" * 64}, "tiddlers": []},
+        headers=AUTH,
+    )
+    assert resp.status_code == 422
+
+
+def test_client_ask_caps(client, monkeypatch):
+    c, _ = client
+    over_count = [
+        {"title": f"T{i}", "text": "", "fields": {}}
+        for i in range(main.MAX_CLIENT_TIDDLERS + 1)
+    ]
+    resp = c.post("/ask", json={"question": "q", "tiddlers": over_count}, headers=AUTH)
+    assert resp.status_code == 422
+
+    # Total-text budget: a few tiddlers under the per-tiddler cap but over 2M.
+    big = [
+        {"title": f"B{i}", "text": "x" * main.MAX_TIDDLER_TEXT, "fields": {}}
+        for i in range(main.MAX_TOTAL_CHARS // main.MAX_TIDDLER_TEXT + 1)
+    ]
+    resp = c.post("/ask", json={"question": "q", "tiddlers": big}, headers=AUTH)
+    assert resp.status_code == 422
+
+    # Per-tiddler overflow is truncated, not rejected.
+    captured = {}
+
+    async def fake_answer_question(**kw):
+        captured.update(kw)
+        return {"answer": "ok", "sources": [], "truncated": False}
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    long_one = {"title": "Long", "text": "x" * (main.MAX_TIDDLER_TEXT + 1), "fields": {}}
+    resp = c.post("/ask", json={"question": "q", "tiddlers": [long_one]}, headers=AUTH)
+    assert resp.status_code == 200
+    assert len(captured["tiddlers"][0]["text"]) == main.MAX_TIDDLER_TEXT
+
+
+def test_client_tiddler_needs_title_or_hash(client):
+    c, _ = client
+    resp = c.post(
+        "/ask", json={"question": "q", "tiddlers": [{"text": "orphan"}]}, headers=AUTH
+    )
+    assert resp.status_code == 422
+
+
+def test_client_routes_require_auth(client):
+    c, _ = client
+    assert c.post("/ask", json={"question": "q"}).status_code == 403
+    assert c.post("/ask/stream", json={"question": "q"}).status_code == 403
+    assert c.post("/related", json={"target": ZEBRA}).status_code == 403
+    assert c.post("/notes/check", json={"hashes": []}).status_code == 403
+
+
+def test_client_ask_backend_failure_is_503(client, monkeypatch):
+    c, _ = client
+
+    async def fake_answer_question(**kw):
+        raise EmbeddingError("Ollama may still be starting up.")
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    resp = c.post("/ask", json={"question": "q", "tiddlers": [ZEBRA]}, headers=AUTH)
+    assert resp.status_code == 503
+    assert "Ollama" in resp.json()["detail"]
 
 
 def test_ask_unexpected_error_is_500_with_cors(client, monkeypatch):

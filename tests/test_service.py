@@ -161,3 +161,70 @@ def test_related_translates_embedding_failure(monkeypatch):
             service.related(nbm, "T", config=FakeConfig(), embedder=object())
         )
     assert exc.value.status == 503
+
+
+# --- *_with_tiddlers cores (client-supplied content, no notebook) ---
+
+
+def test_ask_with_tiddlers_passes_list_through(monkeypatch):
+    captured = {}
+
+    async def fake_answer_question(**kw):
+        captured.update(kw)
+        return {"answer": "ok", "sources": [], "truncated": False}
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    docs = [{"title": "T", "text": "x", "fields": {"tags": "a"}}]
+    result = asyncio.run(
+        service.ask_with_tiddlers(
+            "q?", docs, config=FakeConfig(), embedder=object(), max_tiddlers=0
+        )
+    )
+    assert result["answer"] == "ok"
+    assert captured["tiddlers"] is docs
+    # Same clamp rule as the notebook path: <=0 must not disable embedding.
+    assert captured["max_embed"] == 1
+
+
+def test_ask_with_tiddlers_translates_backend_failure(monkeypatch):
+    async def fake_answer_question(**kw):
+        raise EmbeddingError("embedding down")
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    with pytest.raises(service.AskError) as exc:
+        asyncio.run(
+            service.ask_with_tiddlers(
+                "q?", [], config=FakeConfig(), embedder=object()
+            )
+        )
+    assert exc.value.status == 503
+
+
+def test_ask_stream_with_tiddlers_missing_key_raises_before_stream():
+    """Guard failures must come from the coroutine itself, not the generator —
+    the route turns them into normal HTTP errors before any bytes go out."""
+    with pytest.raises(service.AskError) as exc:
+        asyncio.run(
+            service.ask_stream_with_tiddlers(
+                "q?", [], config=FakeConfig(gemini_api_key=""), embedder=object()
+            )
+        )
+    assert exc.value.status == 503
+
+
+def test_related_with_tiddlers_forwards_target_and_pool(monkeypatch):
+    seen = {}
+
+    async def fake_related(target, tiddlers, embedder, top_k, max_embed=None):
+        seen["target"], seen["tiddlers"] = target, tiddlers
+        return [{"title": "Other", "score": 0.9}], False
+
+    monkeypatch.setattr(service, "ai_related", fake_related)
+    target = {"title": "T", "text": "body", "fields": {}}
+    pool = [{"title": "Other", "text": "o", "fields": {}}]
+    result = asyncio.run(
+        service.related_with_tiddlers(target, pool, embedder=object(), k=3)
+    )
+    assert result == {"related": [{"title": "Other", "score": 0.9}], "truncated": False}
+    assert seen["target"] is target
+    assert seen["tiddlers"] is pool

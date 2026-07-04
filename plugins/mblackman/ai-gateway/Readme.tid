@@ -9,10 +9,22 @@ Set the following tiddlers to point at your gateway instance:
 |!Tiddler |!Purpose |!Default |
 |`$:/config/mblackman/ai-gateway/GatewayURL` |Gateway base URL |`http://localhost:8787` |
 |`$:/config/mblackman/ai-gateway/APIKey` |`GATEWAY_API_KEY` from your `.env` |(empty) |
-|`$:/config/mblackman/ai-gateway/Notebook` |Notebook to query |`default` |
+|`$:/config/mblackman/ai-gateway/Notebook` |Notebook to query (notebook mode only) |`default` |
+|`$:/config/mblackman/ai-gateway/Mode` |`notebook` or `local` — see below |`notebook` |
+|`$:/config/mblackman/ai-gateway/ChatNoteTemplate` |Title template for ''New note'' chats — tokens: `{name}` (random adjective-noun), `{date}` (YYYY-MM-DD), `{time}` (HH:MM) |`AI Chat: {name}` |
+
+!! Modes
+
+* ''notebook'' (default) — the gateway re-fetches your notes from a wiki configured server-side in its `config.yaml`. All features work.
+* ''local'' — this wiki sends its own note content with each request, so ''Ask AI'' and ''Related notes'' work against ''any'' TiddlyWiki, even one the gateway has no configuration or credentials for. Payloads are minimized through the gateway's content-addressed note cache: each note is hashed (sha256), the gateway is asked which hashes it is missing, and only those travel in full — unchanged notes cost a few bytes per question. Reload the wiki after changing the mode.
+
+Local-mode limits (matching the gateway's): at most 500 notes per question, 50k characters per note, 2M characters total — overflow is dropped and the answer is annotated with how many notes were searched (narrow the filter to control which). ''Summarize'', ''Suggest tags'' and ''Extract tasks'' still require a server-configured notebook, as do saved-chat notes syncing anywhere — everything else about chats works locally.
 
 !! Features
 
 * ''Ask AI'' — sidebar panel with a question field and optional TiddlyWiki filter; renders the answer with a collapsible source list.
 * ''Saved chats'' — ''Save chat'' turns the sidebar conversation into a regular note tagged `ai-chat` (one tiddler per turn under `<note>/turn/`), so it syncs and survives reload. While saved, new turns keep landing in the note; ''Continue this chat'' on the note re-binds the sidebar to it later. ''New chat'' starts fresh without touching saved notes.
+* ''New note'' — creates a chat note ''up front'' so the conversation persists from the first turn. The title is proposed from the `ChatNoteTemplate` config tiddler; edit it in place or tap the dice to roll another name, then ''Create'' opens the note and binds the panel to it.
+* ''new AI chat'' page-control button (next to ''new tiddler'') — one tap creates a chat note with a freshly generated template title, opens it, and binds the panel to it. Hide or reorder it under //Control Panel → Appearance → Toolbars → Page Toolbar//.
+* ''In-note chat'' — every `ai-chat` note renders its transcript with a composer underneath, so you can keep asking right in the tiddler and the conversation records itself there. Tag ''any'' note `ai-chat` to start an embedded chat from scratch.
 * ''Summarize'' — toolbar button on any tiddler; calls the gateway with the tiddler as context and writes the result to a `summary` field, displayed above the body.

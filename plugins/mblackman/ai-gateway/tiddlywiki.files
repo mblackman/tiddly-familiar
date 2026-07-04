@@ -35,6 +35,17 @@
             }
         },
         {
+            "file": "ui/NewChatButton.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/plugins/mblackman/ai-gateway/ui/NewChatButton",
+                "caption": "new AI chat",
+                "description": "Create an AI chat note with a generated title",
+                "tags": "$:/tags/PageControls",
+                "list-after": "$:/core/ui/Buttons/new-tiddler"
+            }
+        },
+        {
             "file": "ui/ViewTemplate.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
@@ -70,6 +81,20 @@
             "fields": {
                 "type": "text/vnd.tiddlywiki",
                 "title": "$:/config/mblackman/ai-gateway/Notebook"
+            }
+        },
+        {
+            "file": "config/ChatNoteTemplate.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/ai-gateway/ChatNoteTemplate"
+            }
+        },
+        {
+            "file": "config/Mode.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/ai-gateway/Mode"
             }
         }
     ]

@@ -61,17 +61,19 @@ def _check_generation_backend(config) -> None:
         raise AskError("GEMINI_API_KEY not configured", 503)
 
 
-async def ask(
-    nbm,
+async def ask_with_tiddlers(
     question: str,
+    tiddlers: list[dict],
     *,
     config,
     embedder,
-    filter: str | None = None,
     max_tiddlers: int = 100,
     history: list[dict] | None = None,
 ) -> dict:
-    """Answer a question about a notebook. Returns {answer, sources, truncated}.
+    """Answer a question over an explicit candidate list. Returns
+    {answer, sources, truncated}. Core shared by the notebook path (which
+    fetches the list from the wiki) and the client-supplied-content routes
+    (which receive it in the request body).
 
     `max_tiddlers` bounds embedding-cache *misses* per request (cost control),
     not the candidate pool; it is clamped to >= 1 here because MCP arguments
@@ -79,7 +81,6 @@ async def ask(
     forever. `history` is prior chat turns [{role, content}].
     """
     _check_generation_backend(config)
-    tiddlers = await nbm.filter_tiddlers(filter or DEFAULT_FILTER, full=True)
     try:
         return await answer_question(
             question=question,
@@ -93,7 +94,7 @@ async def ask(
         raise _translate(e) from e
 
 
-async def ask_stream(
+async def ask(
     nbm,
     question: str,
     *,
@@ -102,14 +103,36 @@ async def ask_stream(
     filter: str | None = None,
     max_tiddlers: int = 100,
     history: list[dict] | None = None,
+) -> dict:
+    """Answer a question about a notebook: fetch the filter matches, then
+    delegate to `ask_with_tiddlers`."""
+    _check_generation_backend(config)
+    tiddlers = await nbm.filter_tiddlers(filter or DEFAULT_FILTER, full=True)
+    return await ask_with_tiddlers(
+        question,
+        tiddlers,
+        config=config,
+        embedder=embedder,
+        max_tiddlers=max_tiddlers,
+        history=history,
+    )
+
+
+async def ask_stream_with_tiddlers(
+    question: str,
+    tiddlers: list[dict],
+    *,
+    config,
+    embedder,
+    max_tiddlers: int = 100,
+    history: list[dict] | None = None,
 ):
-    """Streaming `ask`. Fetches candidates first (failures there raise AskError
-    before any bytes are sent), then returns an async generator of
+    """Streaming `ask_with_tiddlers`. Guard failures raise AskError from this
+    coroutine (before any bytes are sent); the returned async generator yields
     (event, data) pairs: ("delta", {text}) fragments, one final ("done",
     {answer, sources, truncated}) — or ("error", {message, status}) if a
     backend fails after the stream has started."""
     _check_generation_backend(config)
-    tiddlers = await nbm.filter_tiddlers(filter or DEFAULT_FILTER, full=True)
 
     async def events():
         try:
@@ -129,23 +152,42 @@ async def ask_stream(
     return events()
 
 
-async def related(
+async def ask_stream(
     nbm,
-    title: str,
+    question: str,
     *,
     config,
     embedder,
-    k: int = 5,
     filter: str | None = None,
     max_tiddlers: int = 100,
-) -> dict:
-    """Tiddlers most similar to `title` by embedding similarity — no
-    generation model involved. Returns {related: [{title, score}], truncated}.
-    """
-    target = await nbm.get_tiddler(title)
-    if target is None:
-        raise AskError(f"Tiddler '{title}' not found", 404)
+    history: list[dict] | None = None,
+):
+    """Streaming `ask`: fetch the filter matches (failures there raise
+    AskError before any bytes are sent), then delegate to
+    `ask_stream_with_tiddlers`."""
+    _check_generation_backend(config)
     tiddlers = await nbm.filter_tiddlers(filter or DEFAULT_FILTER, full=True)
+    return await ask_stream_with_tiddlers(
+        question,
+        tiddlers,
+        config=config,
+        embedder=embedder,
+        max_tiddlers=max_tiddlers,
+        history=history,
+    )
+
+
+async def related_with_tiddlers(
+    target: dict,
+    tiddlers: list[dict],
+    *,
+    embedder,
+    k: int = 5,
+    max_tiddlers: int = 100,
+) -> dict:
+    """Candidates most similar to `target` ({title, text, fields}) by
+    embedding similarity — no generation model involved. Returns
+    {related: [{title, score}], truncated}."""
     try:
         items, truncated = await ai_related(
             target,
@@ -157,6 +199,31 @@ async def related(
     except EmbeddingError as e:
         raise AskError(str(e), 503) from e
     return {"related": items, "truncated": truncated}
+
+
+async def related(
+    nbm,
+    title: str,
+    *,
+    config,
+    embedder,
+    k: int = 5,
+    filter: str | None = None,
+    max_tiddlers: int = 100,
+) -> dict:
+    """Notebook variant of `related_with_tiddlers`: resolve `title` and the
+    candidate pool from the wiki, then delegate."""
+    target = await nbm.get_tiddler(title)
+    if target is None:
+        raise AskError(f"Tiddler '{title}' not found", 404)
+    tiddlers = await nbm.filter_tiddlers(filter or DEFAULT_FILTER, full=True)
+    return await related_with_tiddlers(
+        target,
+        tiddlers,
+        embedder=embedder,
+        k=k,
+        max_tiddlers=max_tiddlers,
+    )
 
 
 def _parse_tags(result: str) -> list[str]:
