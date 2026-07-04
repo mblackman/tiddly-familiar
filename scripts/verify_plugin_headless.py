@@ -65,6 +65,70 @@ async def main():
         await asyncio.sleep(2)
         print("debug:", await get_text(page, "$:/temp/ai-gateway/debug"))
 
+        # --- new chat note: templated title + reroll + create ---
+        tpl_cfg = "$:/config/mblackman/ai-gateway/ChatNoteTemplate"
+        await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-title'})")
+        title1 = await get_text(page, "$:/state/ai-gateway/new-chat-title")
+        print("proposed title (default template):", repr(title1))
+        assert title1.startswith("AI Chat: "), "default template not applied"
+        await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-title'})")
+        title2 = await get_text(page, "$:/state/ai-gateway/new-chat-title")
+        print("rerolled title:", repr(title2))
+        assert title2.startswith("AI Chat: "), "reroll broke the template"
+        await set_tiddler(page, tpl_cfg, "Chat {date} {name}")
+        await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-title'})")
+        title3 = await get_text(page, "$:/state/ai-gateway/new-chat-title")
+        print("custom-template title:", repr(title3))
+        assert title3.startswith("Chat 2"), f"custom template not applied: {title3!r}"
+        await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-note'})")
+        new_note = await get_text(page, "$:/state/ai-gateway/chat-note")
+        print("new chat note bound:", repr(new_note))
+        assert new_note == title3, "panel not bound to the new note"
+        note_fields = await page.evaluate(
+            "(n) => { var t = $tw.wiki.getTiddler(n); "
+            "return t ? {tags: (t.fields.tags||[]).join(' ')} : null; }",
+            new_note,
+        )
+        assert note_fields and "ai-chat" in note_fields["tags"], "new note missing ai-chat tag"
+        assert await get_text(page, "$:/state/ai-gateway/new-chat-title") == "", \
+            "proposed title not cleared after create"
+        story = await page.evaluate("() => $tw.wiki.getTiddlerList('$:/StoryList')")
+        assert new_note in story, "new note not opened in the story"
+        # user-typed titles get sanitized of filter-breaking chars
+        await set_tiddler(page, "$:/state/ai-gateway/new-chat-title", "My [weird] {chat}")
+        await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-note'})")
+        weird_note = await get_text(page, "$:/state/ai-gateway/chat-note")
+        print("sanitized note title:", repr(weird_note))
+        assert weird_note == "My weird chat", f"title not sanitized: {weird_note!r}"
+        # clean up the created notes + config so the button click sees defaults
+        await page.evaluate(
+            "(ts) => ts.forEach(t => $tw.wiki.deleteTiddler(t))",
+            [new_note, weird_note, tpl_cfg],
+        )
+        await set_tiddler(page, "$:/state/ai-gateway/chat-note", "")
+
+        # --- "new AI chat" page-control button: one tap = generated note ---
+        await page.click('button[aria-label="new AI chat"]')
+        btn_note = await get_text(page, "$:/state/ai-gateway/chat-note")
+        print("page-control button created:", repr(btn_note))
+        assert btn_note.startswith("AI Chat: "), "button did not create a templated note"
+        btn_tags = await page.evaluate(
+            "(n) => ($tw.wiki.getTiddler(n).fields.tags || []).join(' ')", btn_note
+        )
+        assert "ai-chat" in btn_tags, "button note missing ai-chat tag"
+        story = await page.evaluate("() => $tw.wiki.getTiddlerList('$:/StoryList')")
+        assert btn_note in story, "button note not opened in the story"
+        # clean up: drop the note, unbind, and take the test notes off the river
+        await page.evaluate("(n) => $tw.wiki.deleteTiddler(n)", btn_note)
+        await set_tiddler(page, "$:/state/ai-gateway/chat-note", "")
+        await page.evaluate(
+            "(ts) => { var sl = $tw.wiki.getTiddler('$:/StoryList'); if (!sl) return; "
+            "$tw.wiki.addTiddler(new $tw.Tiddler(sl, "
+            "{list: ($tw.wiki.getTiddlerList('$:/StoryList') || []).filter(t => ts.indexOf(t) === -1)})); }",
+            [new_note, weird_note, btn_note],
+        )
+        print("new-chat-note flow OK")
+
         # --- streaming ask ---
         await set_tiddler(page, "$:/state/ai-gateway/question", "What is Caddy used for?")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
@@ -155,6 +219,26 @@ async def main():
         )
         assert await get_text(page, "$:/state/ai-gateway/chat-note") == note, "resume did not re-bind"
         print("resume re-bound the panel to the note")
+
+        # --- in-note composer: ask directly from the chat note ---
+        await set_tiddler(page, "$:/state/ai-gateway/note-question/" + note, "And what is AdGuard for?")
+        await page.evaluate(
+            "(n) => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai-note', param: n})", note
+        )
+        for _ in range(120):
+            await asyncio.sleep(0.5)
+            if await get_text(page, "$:/state/ai-gateway/note-asking/" + note) == "no":
+                break
+        in_note = await page.evaluate(
+            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]sort[title]]')"
+            ".map(t => $tw.wiki.getTiddler(t).fields.role)",
+            note,
+        )
+        print("roles after in-note ask:", in_note)
+        assert len(in_note) == 8 and in_note[-2:] == ["user", "assistant"], \
+            f"in-note ask did not append turns: {in_note}"
+        assert await get_text(page, "$:/state/ai-gateway/note-question/" + note) == "", \
+            "in-note question not cleared after send"
 
         # Remove the (real, synced) chat note + turns so reruns start clean.
         await page.evaluate(

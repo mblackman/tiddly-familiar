@@ -1,126 +1,150 @@
 .ai-gw-panel {
   padding: 0.5em 0 1em;
+  display: flex;
+  flex-direction: column;
 }
 
-.ai-gw-field-group {
-  margin-bottom: 0.8em;
-}
+/* --- chat header (saved-note binding + actions) --- */
 
-.ai-gw-label {
-  display: block;
-  font-size: 0.75em;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: <<colour foreground>>;
-  opacity: 0.5;
-  margin-bottom: 0.3em;
-}
-
-.ai-gw-label-hint {
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 1em;
-  opacity: 0.75;
-}
-
-.ai-gw-field-group textarea,
-.ai-gw-field-group input[type="text"],
-.ai-gw-field-group input:not([type]) {
-  width: 100%;
-  box-sizing: border-box;
-  background: <<colour tiddler-background>>;
-  color: <<colour foreground>>;
-  border: 1px solid <<colour tiddler-border>>;
-  border-radius: 3px;
-  padding: 0.45em 0.6em;
-  font-family: inherit;
-  font-size: 0.88em;
-  resize: vertical;
-  transition: border-color 0.15s;
-  display: block;
-}
-
-.ai-gw-field-group textarea:focus,
-.ai-gw-field-group input:focus {
-  outline: none;
-  border-color: <<colour primary>>;
-}
-
-.ai-gw-asking {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45em;
-  font-size: 0.88em;
-  color: <<colour foreground>>;
-  opacity: 0.65;
-  font-style: italic;
-  padding: 0.4em 0;
-}
-
-.ai-gw-btn-ask {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35em;
-  background: <<colour primary>>;
-  color: #fff;
-  border: none;
-  border-radius: 3px;
-  padding: 0.4em 0.9em;
-  font-size: 0.88em;
-  font-weight: 600;
-  cursor: pointer;
-  line-height: 1.4;
-  margin: 0.3em 0;
-}
-
-.ai-gw-btn-ask:hover {
-  filter: brightness(1.12);
-}
-
-.ai-gw-btn-clear.tc-btn-invisible {
-  font-size: 0.82em;
-  color: <<colour foreground>>;
-  opacity: 0.4;
-  margin-left: 0.25em;
-}
-
-.ai-gw-btn-clear.tc-btn-invisible:hover {
-  opacity: 0.9;
-}
-
-.ai-gw-answer {
-  border-left: 3px solid <<colour primary>>;
-  background: <<colour tiddler-background>>;
-  border-radius: 3px;
-  padding: 0.65em 0.9em;
-  margin: 0.75em 0 0.5em;
-  font-size: 0.9em;
-}
-
-.ai-gw-answer-head {
+.ai-gw-chat-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.45em;
+  gap: 0.35em;
+  margin-bottom: 0.4em;
+  min-height: 1.6em;
 }
 
-.ai-gw-answer-label {
-  font-size: 0.72em;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: <<colour primary>>;
-  opacity: 0.85;
+.ai-gw-chat-head-spacer {
+  flex: 1;
 }
 
-.ai-gw-answer-body p:first-child { margin-top: 0; }
-.ai-gw-answer-body p:last-child { margin-bottom: 0; }
+.ai-gw-chat-bound {
+  font-size: 0.78em;
+  color: <<colour foreground>>;
+  opacity: 0.65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+/* --- conversation log (scrolls, newest at the bottom) --- */
+
+.ai-gw-chat-log {
+  display: flex;
+  flex-direction: column;
+  min-height: 10em;
+  max-height: 60vh;
+  overflow-y: auto;
+  border: 1px solid <<colour tiddler-border>>;
+  border-radius: 8px;
+  padding: 0.6em 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.ai-gw-chat-log > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-gw-empty {
+  margin: auto;
+  padding: 1.5em 0;
+  text-align: center;
+  font-size: 0.85em;
+  color: <<colour foreground>>;
+  opacity: 0.45;
+}
+
+.ai-gw-empty-icon {
+  width: 1.8em;
+  height: 1.8em;
+  margin-bottom: 0.4em;
+}
+
+.ai-gw-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.ai-gw-turn {
+  border-radius: 14px;
+  padding: 0.5em 0.8em;
+  font-size: 0.9em;
+  max-width: 88%;
+  overflow-wrap: break-word;
+}
+
+.ai-gw-turn p:first-child { margin-top: 0; }
+.ai-gw-turn p:last-child { margin-bottom: 0; }
+
+.ai-gw-turn-user {
+  align-self: flex-end;
+  background: <<colour primary>>;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.ai-gw-turn-user a.tc-tiddlylink { color: #fff; text-decoration: underline; }
+
+.ai-gw-turn-ai {
+  align-self: flex-start;
+  background: <<colour tiddler-background>>;
+  border: 1px solid <<colour tiddler-border>>;
+  border-bottom-left-radius: 4px;
+}
+
+.ai-gw-turn-streaming,
+.ai-gw-turn-typing,
+.ai-gw-turn-error {
+  margin-top: 0.5em;
+}
+
+.ai-gw-turn-streaming .ai-gw-spinner {
+  margin-left: 0.35em;
+  opacity: 0.6;
+}
+
+.ai-gw-turn-error {
+  border-color: <<colour alert-border>>;
+  background: <<colour alert-background>>;
+  color: <<colour alert-muted-foreground>>;
+}
+
+.ai-gw-turn-error .ai-gw-btn-clear.tc-btn-invisible {
+  float: right;
+  margin-left: 0.4em;
+}
+
+.ai-gw-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  padding: 0.25em 0;
+}
+
+.ai-gw-typing span {
+  width: 0.45em;
+  height: 0.45em;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: ai-gw-typing-blink 1.2s infinite;
+}
+
+.ai-gw-typing span:nth-child(2) { animation-delay: 0.2s; }
+.ai-gw-typing span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes ai-gw-typing-blink {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 0.9; transform: translateY(-0.15em); }
+}
 
 .ai-gw-sources {
-  font-size: 0.88em;
-  margin-bottom: 0.5em;
+  font-size: 0.82em;
+  margin-top: 0.5em;
+  align-self: flex-start;
 }
 
 .ai-gw-sources-toggle.tc-btn-invisible {
@@ -138,6 +162,161 @@
   margin-top: 0.35em;
   padding-left: 0.5em;
   border-left: 2px solid <<colour tiddler-border>>;
+}
+
+/* --- composer (SMS-style input row pinned under the log) --- */
+
+.ai-gw-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4em;
+}
+
+.ai-gw-input-wrap {
+  flex: 1;
+  display: block;
+}
+
+.ai-gw-composer textarea.ai-gw-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: <<colour tiddler-background>>;
+  color: <<colour foreground>>;
+  border: 1px solid <<colour tiddler-border>>;
+  border-radius: 1.1em;
+  padding: 0.45em 0.9em;
+  font-family: inherit;
+  font-size: 0.9em;
+  line-height: 1.4;
+  resize: none;
+  display: block;
+  transition: border-color 0.15s;
+}
+
+.ai-gw-composer textarea.ai-gw-input:focus {
+  outline: none;
+  border-color: <<colour primary>>;
+}
+
+.ai-gw-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.15em;
+  height: 2.15em;
+  flex-shrink: 0;
+  background: <<colour primary>>;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+}
+
+.ai-gw-send:hover {
+  filter: brightness(1.12);
+}
+
+.ai-gw-send .ai-gw-icon {
+  width: 1.05em;
+  height: 1.05em;
+}
+
+.ai-gw-send-busy {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.ai-gw-send-busy:hover {
+  filter: none;
+}
+
+.ai-gw-filter-toggle.tc-btn-invisible {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.15em;
+  height: 2.15em;
+  flex-shrink: 0;
+  color: <<colour foreground>>;
+  opacity: 0.4;
+  padding: 0;
+}
+
+.ai-gw-filter-toggle.tc-btn-invisible:hover {
+  opacity: 0.9;
+  color: <<colour primary>>;
+}
+
+.ai-gw-filter-toggle.ai-gw-filter-active.tc-btn-invisible {
+  color: <<colour primary>>;
+  opacity: 0.9;
+}
+
+.ai-gw-filter-toggle .ai-gw-icon {
+  width: 1.1em;
+  height: 1.1em;
+}
+
+.ai-gw-filter-row {
+  margin-bottom: 0.45em;
+}
+
+/* --- new-chat-note title row --- */
+
+.ai-gw-newnote-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  margin-bottom: 0.45em;
+}
+
+.ai-gw-newnote-input {
+  flex: 1;
+  display: block;
+}
+
+.ai-gw-newnote-row .ai-gw-preset {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25em 0.55em;
+  flex-shrink: 0;
+}
+
+.ai-gw-filter-row input[type="text"],
+.ai-gw-filter-row input:not([type]),
+.ai-gw-newnote-input input[type="text"],
+.ai-gw-newnote-input input:not([type]) {
+  width: 100%;
+  box-sizing: border-box;
+  background: <<colour tiddler-background>>;
+  color: <<colour foreground>>;
+  border: 1px solid <<colour tiddler-border>>;
+  border-radius: 3px;
+  padding: 0.4em 0.6em;
+  font-family: inherit;
+  font-size: 0.85em;
+  display: block;
+  transition: border-color 0.15s;
+}
+
+.ai-gw-filter-row input:focus,
+.ai-gw-newnote-input input:focus {
+  outline: none;
+  border-color: <<colour primary>>;
+}
+
+/* --- shared bits (also used by ViewTemplate / ToolbarButton) --- */
+
+.ai-gw-btn-clear.tc-btn-invisible {
+  font-size: 0.82em;
+  color: <<colour foreground>>;
+  opacity: 0.4;
+  margin-left: 0.25em;
+}
+
+.ai-gw-btn-clear.tc-btn-invisible:hover {
+  opacity: 0.9;
 }
 
 .ai-gw-icon {
@@ -299,60 +478,17 @@
   opacity: 0.9;
 }
 
-.ai-gw-chat {
-  margin: 0.75em 0 0.25em;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5em;
-}
-
-.ai-gw-turn {
-  border-radius: 6px;
-  padding: 0.5em 0.8em;
-  font-size: 0.9em;
-  max-width: 92%;
-}
-
-.ai-gw-turn p:first-child { margin-top: 0; }
-.ai-gw-turn p:last-child { margin-bottom: 0; }
-
-.ai-gw-turn-user {
-  align-self: flex-end;
-  background: <<colour primary>>;
-  color: #fff;
-}
-
-.ai-gw-turn-user a.tc-tiddlylink { color: #fff; text-decoration: underline; }
-
-.ai-gw-turn-ai {
-  align-self: flex-start;
-  background: <<colour tiddler-background>>;
-  border: 1px solid <<colour tiddler-border>>;
-}
-
-.ai-gw-turn-streaming {
-  margin-top: 0.5em;
-}
-
-.ai-gw-turn-streaming .ai-gw-spinner {
-  margin-left: 0.35em;
-  opacity: 0.6;
-}
-
 .ai-gw-chat-actions {
   margin-top: 0.6em;
 }
 
-.ai-gw-chat-note {
-  margin-bottom: 0.5em;
+.ai-gw-note-composer {
+  margin-top: 0.6em;
+  max-width: 40em;
 }
 
-.ai-gw-chat-bound {
-  display: block;
-  font-size: 0.78em;
-  color: <<colour foreground>>;
-  opacity: 0.65;
-  margin-top: 0.75em;
+.ai-gw-chat-note {
+  margin-bottom: 0.5em;
 }
 
 .ai-gw-turn-sources {

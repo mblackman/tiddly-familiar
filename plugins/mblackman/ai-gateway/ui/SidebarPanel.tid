@@ -7,8 +7,6 @@
 \end
 
 \define ai-gw-transcript(prefix)
-<$list filter="[prefix[$prefix$]limit[1]]" variable="ignore-has-chat">
-<div class="ai-gw-chat">
 <$list filter="[prefix[$prefix$]sort[title]]" variable="turn">
 <$vars turnClass={{{ [<turn>get[role]match[user]then[ai-gw-turn ai-gw-turn-user]else[ai-gw-turn ai-gw-turn-ai]] }}}>
 <div class=<<turnClass>>>
@@ -16,19 +14,116 @@
 </div>
 </$vars>
 </$list>
-</div>
-</$list>
 \end
 
 <div class="ai-gw-panel">
 
-<div class="ai-gw-field-group">
-<span class="ai-gw-label">Question</span>
-<$edit-text tiddler="$:/state/ai-gateway/question" tag="textarea" placeholder="Ask anything about your notes…" rows="4"/>
+<div class="ai-gw-chat-head">
+<$reveal state="$:/state/ai-gateway/chat-note" type="nomatch" text="" tag="span">
+<span class="ai-gw-chat-bound">Saving to <$link to={{$:/state/ai-gateway/chat-note}}><$text text={{$:/state/ai-gateway/chat-note}}/></$link></span>
+</$reveal>
+<span class="ai-gw-chat-head-spacer"></span>
+<$button class="ai-gw-preset" tooltip="Start a fresh chat saved to a note from the first turn">
+<$action-setfield $tiddler="$:/state/ai-gateway/new-note-open" text={{{ [{$:/state/ai-gateway/new-note-open}match[yes]then[no]else[yes]] }}}/>
+<$list filter="[{$:/state/ai-gateway/new-note-open}!match[yes]]" variable="ignore-opening">
+<$action-sendmessage $message="tm-new-chat-title"/>
+</$list>
+New note
+</$button>
+<$reveal state="$:/state/ai-gateway/chat-note" type="match" text="" tag="span">
+<$list filter="[prefix[$:/temp/ai-gateway/chat/]limit[1]]" variable="ignore-has-chat">
+<$button class="ai-gw-preset" tooltip="Save this conversation as a note so it survives reload and keeps growing">
+<$action-sendmessage $message="tm-save-chat"/>
+Save chat
+</$button>
+<$button class="ai-gw-preset" tooltip="Forget this conversation and start over">
+<<ai-gw-clear-chat>>
+New chat
+</$button>
+</$list>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/chat-note" type="nomatch" text="" tag="span">
+<$button class="ai-gw-preset" tooltip="Start a new conversation (the saved note keeps this one)">
+<<ai-gw-clear-chat>>
+New chat
+</$button>
+</$reveal>
 </div>
 
-<div class="ai-gw-field-group">
-<span class="ai-gw-label">Filter <span class="ai-gw-label-hint">(optional)</span></span>
+<$reveal state="$:/state/ai-gateway/new-note-open" type="match" text="yes" tag="div">
+<div class="ai-gw-newnote-row">
+<$keyboard key="enter" class="ai-gw-newnote-input" actions="""<$action-sendmessage $message="tm-new-chat-note"/>""">
+<$edit-text tiddler="$:/state/ai-gateway/new-chat-title" tag="input" placeholder="Note title…"/>
+</$keyboard>
+<$button class="ai-gw-preset" tooltip="Roll another name">
+<$action-sendmessage $message="tm-new-chat-title"/>
+<svg class="ai-gw-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.5" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.5" fill="currentColor"/></svg>
+</$button>
+<$button class="ai-gw-preset" tooltip="Create the note and chat into it (Enter)">
+<$action-sendmessage $message="tm-new-chat-note"/>
+Create
+</$button>
+<$button class="tc-btn-invisible ai-gw-btn-clear" tooltip="Cancel">
+<$action-setfield $tiddler="$:/state/ai-gateway/new-note-open" text="no"/>
+&times;
+</$button>
+</div>
+</$reveal>
+
+<div class="ai-gw-chat-log">
+
+<$reveal state="$:/state/ai-gateway/chat-note" type="match" text="" tag="div">
+<$list filter="[prefix[$:/temp/ai-gateway/chat/]limit[1]]" variable="ignore-has-chat" emptyMessage="""<div class="ai-gw-empty"><svg class="ai-gw-empty-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg><br/>Ask anything about your notes</div>""">
+<div class="ai-gw-chat">
+<<ai-gw-transcript "$:/temp/ai-gateway/chat/">>
+</div>
+</$list>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/chat-note" type="nomatch" text="" tag="div">
+<div class="ai-gw-chat">
+<$macrocall $name="ai-gw-transcript" prefix={{{ [{$:/state/ai-gateway/chat-note}addsuffix[/turn/]] }}}/>
+</div>
+</$reveal>
+
+<$reveal state="$:/state/ai-gateway/asking" type="match" text="yes" tag="div">
+<$reveal state="$:/state/ai-gateway/answer" type="match" text="" tag="div">
+<div class="ai-gw-turn ai-gw-turn-ai ai-gw-turn-typing"><span class="ai-gw-typing"><span></span><span></span><span></span></span></div>
+</$reveal>
+<$reveal state="$:/state/ai-gateway/answer" type="nomatch" text="" tag="div">
+<div class="ai-gw-turn ai-gw-turn-ai ai-gw-turn-streaming">
+<$transclude tiddler="$:/state/ai-gateway/answer" mode="block"/>
+<span class="ai-gw-spinner"></span>
+</div>
+</$reveal>
+</$reveal>
+
+<$reveal state="$:/state/ai-gateway/asking" type="nomatch" text="yes" tag="div">
+<$reveal state="$:/state/ai-gateway/answer" type="nomatch" text="" tag="div">
+<div class="ai-gw-turn ai-gw-turn-ai ai-gw-turn-error">
+<$button class="tc-btn-invisible ai-gw-btn-clear" tooltip="Dismiss"><$action-setfield $tiddler="$:/state/ai-gateway/answer" text=""/>&times;</$button>
+<$transclude tiddler="$:/state/ai-gateway/answer" mode="block"/>
+</div>
+</$reveal>
+</$reveal>
+
+<$reveal state="$:/state/ai-gateway/sources" type="nomatch" text="" tag="div">
+<div class="ai-gw-sources">
+<$button class="tc-btn-invisible ai-gw-sources-toggle">
+<$action-setfield $tiddler="$:/state/ai-gateway/sources-open" text={{{ [{$:/state/ai-gateway/sources-open}match[yes]then[no]else[yes]] }}}/>
+<$reveal state="$:/state/ai-gateway/sources-open" type="match" text="yes" tag="span">▾ Sources</$reveal><$reveal state="$:/state/ai-gateway/sources-open" type="nomatch" text="yes" tag="span">▸ Sources</$reveal>
+</$button>
+<$reveal state="$:/state/ai-gateway/sources-open" type="match" text="yes" tag="div">
+<div class="ai-gw-sources-list">{{$:/state/ai-gateway/sources}}</div>
+</$reveal>
+</div>
+</$reveal>
+
+</div>
+
+<div class="ai-gw-composer">
+
+<$reveal state="$:/state/ai-gateway/filter-open" type="match" text="yes" tag="div">
+<div class="ai-gw-filter-row">
 <$edit-text tiddler="$:/state/ai-gateway/filter" tag="input" placeholder="[!is[system]]"/>
 <div class="ai-gw-presets">
 <$button class="ai-gw-preset" tooltip="Search every note (clears the filter)">
@@ -47,79 +142,29 @@ its tag
 </$button>
 </div>
 </div>
-
-<$reveal state="$:/state/ai-gateway/asking" type="match" text="yes">
-<span class="ai-gw-asking"><span class="ai-gw-spinner"></span> Thinking…</span>
 </$reveal>
-<$reveal state="$:/state/ai-gateway/asking" type="nomatch" text="yes">
-<$button class="ai-gw-btn-ask" tooltip="Ask AI about your notes">
+
+<div class="ai-gw-composer-row">
+<$vars filterBtnClass={{{ [{$:/state/ai-gateway/filter}!match[]then[tc-btn-invisible ai-gw-filter-toggle ai-gw-filter-active]else[tc-btn-invisible ai-gw-filter-toggle]] }}}>
+<$button class=<<filterBtnClass>> tooltip="Limit which notes the AI searches">
+<$action-setfield $tiddler="$:/state/ai-gateway/filter-open" text={{{ [{$:/state/ai-gateway/filter-open}match[yes]then[no]else[yes]] }}}/>
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/></svg>
+</$button>
+</$vars>
+<$keyboard key="enter" class="ai-gw-input-wrap" actions="""<$action-sendmessage $message="tm-ask-ai"/>""">
+<$edit-text tiddler="$:/state/ai-gateway/question" tag="textarea" rows="1" autoHeight="yes" minHeight="0px" placeholder="Ask your notes…" class="ai-gw-input"/>
+</$keyboard>
+<$reveal state="$:/state/ai-gateway/asking" type="nomatch" text="yes" tag="span">
+<$button class="ai-gw-send" tooltip="Send (Enter)">
 <$action-sendmessage $message="tm-ask-ai"/>
-<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Ask
+<svg class="ai-gw-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
 </$button>
 </$reveal>
+<$reveal state="$:/state/ai-gateway/asking" type="match" text="yes" tag="span">
+<span class="ai-gw-send ai-gw-send-busy"><span class="ai-gw-spinner"></span></span>
+</$reveal>
+</div>
 
-<$reveal state="$:/state/ai-gateway/chat-note" type="match" text="">
-<<ai-gw-transcript "$:/temp/ai-gateway/chat/">>
-</$reveal>
-<$reveal state="$:/state/ai-gateway/chat-note" type="nomatch" text="">
-<div class="ai-gw-chat-bound">Saving to <$link to={{$:/state/ai-gateway/chat-note}}><$text text={{$:/state/ai-gateway/chat-note}}/></$link></div>
-<$macrocall $name="ai-gw-transcript" prefix={{{ [{$:/state/ai-gateway/chat-note}addsuffix[/turn/]] }}}/>
-</$reveal>
-
-<$reveal state="$:/state/ai-gateway/asking" type="match" text="yes">
-<$reveal state="$:/state/ai-gateway/answer" type="nomatch" text="">
-<div class="ai-gw-turn ai-gw-turn-ai ai-gw-turn-streaming">
-<$transclude tiddler="$:/state/ai-gateway/answer" mode="block"/>
-<span class="ai-gw-spinner"></span>
 </div>
-</$reveal>
-</$reveal>
-
-<$reveal state="$:/state/ai-gateway/asking" type="nomatch" text="yes">
-<$reveal state="$:/state/ai-gateway/answer" type="nomatch" text="">
-<div class="ai-gw-answer">
-<div class="ai-gw-answer-head">
-<span class="ai-gw-answer-label">Problem</span>
-<$button class="tc-btn-invisible ai-gw-btn-clear" tooltip="Clear"><$action-setfield $tiddler="$:/state/ai-gateway/answer" text=""/>×</$button>
-</div>
-<div class="ai-gw-answer-body">{{$:/state/ai-gateway/answer}}</div>
-</div>
-</$reveal>
-</$reveal>
-
-<$reveal state="$:/state/ai-gateway/sources" type="nomatch" text="">
-<div class="ai-gw-sources">
-<$button class="tc-btn-invisible ai-gw-sources-toggle">
-<$action-setfield $tiddler="$:/state/ai-gateway/sources-open" text={{{ [{$:/state/ai-gateway/sources-open}match[yes]then[no]else[yes]] }}}/>
-<$reveal state="$:/state/ai-gateway/sources-open" type="match" text="yes">▾ Sources</$reveal><$reveal state="$:/state/ai-gateway/sources-open" type="nomatch" text="yes">▸ Sources</$reveal>
-</$button>
-<$reveal state="$:/state/ai-gateway/sources-open" type="match" text="yes">
-<div class="ai-gw-sources-list">{{$:/state/ai-gateway/sources}}</div>
-</$reveal>
-</div>
-</$reveal>
-
-<$reveal state="$:/state/ai-gateway/chat-note" type="match" text="">
-<$list filter="[prefix[$:/temp/ai-gateway/chat/]limit[1]]" variable="ignore-clear">
-<div class="ai-gw-chat-actions">
-<$button class="ai-gw-preset" tooltip="Save this conversation as a note so it survives reload and keeps growing">
-<$action-sendmessage $message="tm-save-chat"/>
-Save chat
-</$button>
-<$button class="ai-gw-preset" tooltip="Forget this conversation and start over">
-<<ai-gw-clear-chat>>
-New chat
-</$button>
-</div>
-</$list>
-</$reveal>
-<$reveal state="$:/state/ai-gateway/chat-note" type="nomatch" text="">
-<div class="ai-gw-chat-actions">
-<$button class="ai-gw-preset" tooltip="Start a new conversation (the saved note keeps this one)">
-<<ai-gw-clear-chat>>
-New chat
-</$button>
-</div>
-</$reveal>
 
 </div>
