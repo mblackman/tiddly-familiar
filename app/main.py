@@ -286,6 +286,22 @@ class ClientRelatedBody(BaseModel):
         return self
 
 
+class ClientGenerateBody(BaseModel):
+    """Generate over client-supplied text: the browser renders the note to
+    plain text itself (the server can't render a wiki it has no session for)
+    and, for the tags command, sends its own tag vocabulary."""
+
+    title: str = Field(min_length=1)
+    text: str = ""
+    command: str
+    vocabulary: list[str] = Field(default_factory=list, max_length=2000)
+
+    @field_validator("text")
+    @classmethod
+    def _truncate(cls, v: str) -> str:
+        return v[:MAX_TIDDLER_TEXT]
+
+
 class NotesCheckBody(BaseModel):
     hashes: list[str] = Field(default_factory=list, max_length=2000)
 
@@ -559,6 +575,25 @@ async def client_ask_stream(body: ClientAskBody):
             yield name, data
 
     return _sse_response(with_cache_stats())
+
+
+@app.post("/generate", dependencies=[Depends(require_auth)])
+async def client_generate(body: ClientGenerateBody):
+    """One-shot generation command (summarize / tags / title / tasks) over
+    text the client rendered itself. No note-cache involvement: the payload
+    is a single rendered note, not raw wiki content."""
+    try:
+        return await service.generate_with_text(
+            body.title,
+            body.text,
+            body.command,
+            config=_config,
+            vocabulary=body.vocabulary or None,
+        )
+    except service.AskError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/related", dependencies=[Depends(require_auth)])

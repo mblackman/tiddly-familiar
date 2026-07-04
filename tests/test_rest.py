@@ -371,6 +371,40 @@ def test_client_related(client, monkeypatch):
     assert data["cache"] == {"hits": 0, "misses": 1}
 
 
+def test_client_generate(client, monkeypatch):
+    async def fake_run_command(command, title, text, cfg, vocabulary=None):
+        assert (command, title, text) == ("summarize", "Zebra", "rendered text")
+        assert vocabulary is None
+        return "a summary"
+
+    monkeypatch.setattr(service, "run_command", fake_run_command)
+    c, _ = client
+    resp = c.post(
+        "/generate",
+        json={"title": "Zebra", "text": "rendered text", "command": "summarize"},
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"command": "summarize", "title": "Zebra", "result": "a summary"}
+
+
+def test_client_generate_guards(client):
+    c, _ = client
+    bad_cmd = c.post(
+        "/generate",
+        json={"title": "T", "text": "x", "command": "translate"},
+        headers=AUTH,
+    )
+    assert bad_cmd.status_code == 400
+    empty = c.post(
+        "/generate",
+        json={"title": "T", "text": "  ", "command": "summarize"},
+        headers=AUTH,
+    )
+    assert empty.status_code == 422
+    assert c.post("/generate", json={"title": "T", "command": "summarize"}).status_code == 403
+
+
 def test_client_related_ref_target_is_422(client):
     c, _ = client
     resp = c.post(

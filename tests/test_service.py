@@ -212,6 +212,36 @@ def test_ask_stream_with_tiddlers_missing_key_raises_before_stream():
     assert exc.value.status == 503
 
 
+def test_generate_with_text_runs_command(monkeypatch):
+    seen = {}
+
+    async def fake_run_command(command, title, text, cfg, vocabulary=None):
+        seen.update(command=command, title=title, text=text, vocabulary=vocabulary)
+        return "tag-a\ntag-b"
+
+    monkeypatch.setattr(service, "run_command", fake_run_command)
+    result = asyncio.run(
+        service.generate_with_text(
+            "T", "  body  ", "tags", config=FakeConfig(), vocabulary=["tag-a"]
+        )
+    )
+    assert seen == {"command": "tags", "title": "T", "text": "body", "vocabulary": ["tag-a"]}
+    assert result["tags"] == ["tag-a", "tag-b"]
+
+
+def test_generate_with_text_guards():
+    with pytest.raises(service.AskError) as exc:
+        asyncio.run(
+            service.generate_with_text("T", "x", "translate", config=FakeConfig())
+        )
+    assert exc.value.status == 400
+    with pytest.raises(service.AskError) as exc:
+        asyncio.run(
+            service.generate_with_text("T", "   ", "summarize", config=FakeConfig())
+        )
+    assert exc.value.status == 422
+
+
 def test_related_with_tiddlers_forwards_target_and_pool(monkeypatch):
     seen = {}
 

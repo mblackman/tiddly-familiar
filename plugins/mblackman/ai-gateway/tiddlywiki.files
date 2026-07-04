@@ -77,24 +77,10 @@
             }
         },
         {
-            "file": "config/Notebook.tid",
-            "fields": {
-                "type": "text/vnd.tiddlywiki",
-                "title": "$:/config/mblackman/ai-gateway/Notebook"
-            }
-        },
-        {
             "file": "config/ChatNoteTemplate.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
                 "title": "$:/config/mblackman/ai-gateway/ChatNoteTemplate"
-            }
-        },
-        {
-            "file": "config/Mode.tid",
-            "fields": {
-                "type": "text/vnd.tiddlywiki",
-                "title": "$:/config/mblackman/ai-gateway/Mode"
             }
         }
     ]

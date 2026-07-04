@@ -22,13 +22,11 @@ exports.startup = function() {
     };
 
     var baseURL = cfg("GatewayURL") || "http://localhost:8787";
-    var notebook = cfg("Notebook") || "default";
     var apiKey   = cfg("APIKey");
-    // "notebook": the gateway re-fetches notes from a server-configured wiki.
-    // "local": this wiki sends its own note content with each request, so ask
-    // and related-notes work against any TiddlyWiki the gateway never heard of.
-    var mode     = cfg("Mode") === "local" ? "local" : "notebook";
 
+    // This wiki sends its own note content with every request (the gateway's
+    // client-supplied-content routes), so everything works against any
+    // TiddlyWiki — the gateway needs no notebook config or wiki credentials.
     // Budgets mirrored from the gateway (MAX_CLIENT_TIDDLERS etc. in main.py):
     // enforce here by dropping overflow so requests never 422.
     var LOCAL_MAX_TIDDLERS = 500;
@@ -413,25 +411,14 @@ exports.startup = function() {
       ask: function(question, filter, history) {
         var body = {question: question};
         if (history && history.length) body.history = history;
-        if (mode === "local") {
-          return localPayload(filter).then(function(p) {
-            return localFetch("/ask", p, function(tiddlers) {
-              body.tiddlers = tiddlers;
-              return body;
-            });
+        return localPayload(filter).then(function(p) {
+          return localFetch("/ask", p, function(tiddlers) {
+            body.tiddlers = tiddlers;
+            return body;
           }).then(function(r) {
             if (!r.ok) return rejectWithDetail(r);
-            return r.json();
+            return r.json().then(function(data) { return annotateLocal(data, p); });
           });
-        }
-        if (filter) body.filter = filter;
-        return fetch(baseURL + "/notebooks/" + notebook + "/ask", {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify(body)
-        }).then(function(r) {
-          if (!r.ok) return rejectWithDetail(r);
-          return r.json();
         });
       },
       // SSE stream of the answer: handlers.onDelta(text) per fragment, then
@@ -440,92 +427,67 @@ exports.startup = function() {
       askStream: function(question, filter, history, handlers) {
         var body = {question: question};
         if (history && history.length) body.history = history;
-        if (mode === "local") {
-          return localPayload(filter).then(function(p) {
-            return localFetch("/ask/stream", p, function(tiddlers) {
-              body.tiddlers = tiddlers;
-              return body;
-            }).then(function(r) {
-              if (!r.ok) return rejectWithDetail(r);
-              if (!r.body || !r.body.getReader) {
-                // ask() is mode-aware, so the fallback stays local too
-                return $tw.TiddlyPWAGateway.ask(question, filter, history)
-                  .then(function(data) { handlers.onDone(annotateLocal(data, p)); });
-              }
-              return pumpSSE(r, {
-                onDelta: handlers.onDelta,
-                onDone: function(data) { handlers.onDone(annotateLocal(data, p)); }
-              });
+        return localPayload(filter).then(function(p) {
+          return localFetch("/ask/stream", p, function(tiddlers) {
+            body.tiddlers = tiddlers;
+            return body;
+          }).then(function(r) {
+            if (!r.ok) return rejectWithDetail(r);
+            if (!r.body || !r.body.getReader) {
+              return $tw.TiddlyPWAGateway.ask(question, filter, history)
+                .then(function(data) { handlers.onDone(data); });
+            }
+            return pumpSSE(r, {
+              onDelta: handlers.onDelta,
+              onDone: function(data) { handlers.onDone(annotateLocal(data, p)); }
             });
           });
+        });
+      },
+      // One-shot generation command over a single tiddler (summarize / tags /
+      // title / tasks). The note is rendered to plain text HERE — the gateway
+      // can't render a wiki it has no session for — with a raw-text fallback
+      // for data tiddlers, matching the server-side notebook behaviour.
+      generate: function(title, command) {
+        var t = $tw.wiki.getTiddler(title);
+        if (!t) {
+          var missing = new Error("Tiddler '" + title + "' not found");
+          missing.status = 404;
+          return Promise.reject(missing);
         }
-        if (filter) body.filter = filter;
-        return fetch(baseURL + "/notebooks/" + notebook + "/ask/stream", {
+        var text = "";
+        try { text = ($tw.wiki.renderTiddler("text/plain", title) || "").trim(); } catch (e) {}
+        if (!text) text = String(t.fields.text || "").trim();
+        var body = {title: title, command: command, text: text.slice(0, LOCAL_MAX_TEXT)};
+        if (command === "tags") {
+          body.vocabulary = $tw.wiki.filterTiddlers("[tags[]]");
+        }
+        return fetch(baseURL + "/generate", {
           method: "POST",
           headers: headers(),
           body: JSON.stringify(body)
         }).then(function(r) {
           if (!r.ok) return rejectWithDetail(r);
-          if (!r.body || !r.body.getReader) {
-            return $tw.TiddlyPWAGateway.ask(question, filter, history)
-              .then(function(data) { handlers.onDone(data); });
-          }
-          return pumpSSE(r, handlers);
-        });
-      },
-      // One-shot generation command over a single tiddler (summarize / tags /
-      // title / tasks) — no retrieval round-trip.
-      generate: function(title, command) {
-        return fetch(baseURL + "/notebooks/" + notebook + "/generate", {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify({title: title, command: command})
-        }).then(function(r) {
-          if (!r.ok) return rejectWithDetail(r);
           return r.json();
         });
       },
-      writeTiddler: function(title, text, fields) {
-        var body = {title: title, text: text || "", fields: fields || {}};
-        return fetch(baseURL + "/notebooks/" + notebook + "/tiddler", {
-          method: "PUT", headers: headers(), body: JSON.stringify(body)
-        }).then(function(r) { return r.ok; });
-      },
-      getTiddler: function(title) {
-        return fetch(baseURL + "/notebooks/" + notebook + "/tiddler?title=" + encodeURIComponent(title), {
-          headers: headers()
-        }).then(function(r) { return r.ok ? r.json() : null; });
-      },
-      search: function(filter) {
-        return fetch(baseURL + "/notebooks/" + notebook + "/tiddlers?filter=" + encodeURIComponent(filter), {
-          headers: headers()
-        }).then(function(r) { return r.json(); }).then(function(d) { return d.titles || d.tiddlers || []; });
-      },
       related: function(title, k) {
-        if (mode === "local") {
-          var t = $tw.wiki.getTiddler(title);
-          if (!t) {
-            var missing = new Error("Tiddler '" + title + "' not found");
-            missing.status = 404;
-            return Promise.reject(missing);
-          }
-          var tags = t.fields.tags ? $tw.utils.stringifyList(t.fields.tags) : "";
-          var target = {
-            title: title,
-            text: String(t.fields.text || "").slice(0, LOCAL_MAX_TEXT),
-            fields: tags ? {tags: tags} : {}
-          };
-          return localPayload(null).then(function(p) {
-            return localFetch("/related", p, function(tiddlers) {
-              return {target: target, tiddlers: tiddlers, k: k || 5};
-            });
-          }).then(function(r) {
-            if (!r.ok) return rejectWithDetail(r);
-            return r.json();
-          });
+        var t = $tw.wiki.getTiddler(title);
+        if (!t) {
+          var missing = new Error("Tiddler '" + title + "' not found");
+          missing.status = 404;
+          return Promise.reject(missing);
         }
-        return fetch(baseURL + "/notebooks/" + notebook + "/related?title=" + encodeURIComponent(title) + "&k=" + (k || 5), {
-          headers: headers()
+        var tags = t.fields.tags ? $tw.utils.stringifyList(t.fields.tags) : "";
+        var target = {
+          title: title,
+          text: String(t.fields.text || "").slice(0, LOCAL_MAX_TEXT),
+          fields: tags ? {tags: tags} : {}
+        };
+        return localPayload(null).then(function(p) {
+          return localFetch("/related", p, function(tiddlers) {
+            return {target: target, tiddlers: tiddlers, k: k || 5};
+          });
         }).then(function(r) {
           if (!r.ok) return rejectWithDetail(r);
           return r.json();
@@ -817,8 +779,7 @@ exports.startup = function() {
       });
     });
 
-    dbg("ready - gateway=" + baseURL + " mode=" + mode +
-        (mode === "local" ? "" : " notebook=" + notebook) +
+    dbg("ready - gateway=" + baseURL + " (local mode)" +
         " apiKey=" + (apiKey ? "set(" + apiKey.length + ")" : "MISSING"));
   } catch (e) {
     dbg("STARTUP ERROR: " + (e && e.stack ? e.stack : e));

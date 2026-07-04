@@ -237,6 +237,43 @@ def _parse_tags(result: str) -> list[str]:
     return tags[:5]
 
 
+async def generate_with_text(
+    title: str,
+    text: str,
+    command: str,
+    *,
+    config,
+    vocabulary: list[str] | None = None,
+) -> dict:
+    """One-shot generation command over already-resolved plain text
+    (summarize / tags / title / tasks) — no embedding round-trip. Core shared
+    by the notebook path (which renders the tiddler server-side) and the
+    client-supplied-content route (which receives browser-rendered text).
+    Returns {command, title, result} plus `tags` (parsed list) for the tags
+    command. `vocabulary` seeds the tags command with existing tag names.
+    """
+    if command not in COMMANDS:
+        raise AskError(
+            f"Unknown command '{command}' — expected one of: "
+            f"{', '.join(sorted(COMMANDS))}",
+            400,
+        )
+    _check_generation_backend(config)
+    text = (text or "").strip()
+    if not text:
+        raise AskError(f"Tiddler '{title}' has no text to work with", 422)
+
+    try:
+        result = await run_command(command, title, text, config, vocabulary)
+    except Exception as e:
+        raise _translate(e) from e
+
+    out = {"command": command, "title": title, "result": result}
+    if command == "tags":
+        out["tags"] = _parse_tags(result)
+    return out
+
+
 async def generate(
     nbm,
     title: str,
@@ -244,10 +281,8 @@ async def generate(
     *,
     config,
 ) -> dict:
-    """One-shot generation command over a single tiddler (summarize / tags /
-    title / tasks) — render → generate, no embedding round-trip. Returns
-    {command, title, result} plus `tags` (parsed list) for the tags command.
-    """
+    """Notebook variant of `generate_with_text`: resolve the tiddler, render
+    it to plain text server-side, then delegate."""
     if command not in COMMANDS:
         raise AskError(
             f"Unknown command '{command}' — expected one of: "
@@ -264,22 +299,14 @@ async def generate(
     text = (await nbm.render(title, mode="plain") or "").strip()
     if not text:
         text = tiddler.get("text", "").strip()
-    if not text:
-        raise AskError(f"Tiddler '{title}' has no text to work with", 422)
 
     vocabulary = None
     if command == "tags":
         vocabulary = await nbm.filter_tiddlers("[tags[]]")
 
-    try:
-        result = await run_command(command, title, text, config, vocabulary)
-    except Exception as e:
-        raise _translate(e) from e
-
-    out = {"command": command, "title": title, "result": result}
-    if command == "tags":
-        out["tags"] = _parse_tags(result)
-    return out
+    return await generate_with_text(
+        title, text, command, config=config, vocabulary=vocabulary
+    )
 
 
 async def digest(

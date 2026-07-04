@@ -9,16 +9,13 @@ Set the following tiddlers to point at your gateway instance:
 |!Tiddler |!Purpose |!Default |
 |`$:/config/mblackman/ai-gateway/GatewayURL` |Gateway base URL |`http://localhost:8787` |
 |`$:/config/mblackman/ai-gateway/APIKey` |`GATEWAY_API_KEY` from your `.env` |(empty) |
-|`$:/config/mblackman/ai-gateway/Notebook` |Notebook to query (notebook mode only) |`default` |
-|`$:/config/mblackman/ai-gateway/Mode` |`notebook` or `local` — see below |`notebook` |
 |`$:/config/mblackman/ai-gateway/ChatNoteTemplate` |Title template for ''New note'' chats — tokens: `{name}` (random adjective-noun), `{date}` (YYYY-MM-DD), `{time}` (HH:MM) |`AI Chat: {name}` |
 
-!! Modes
+!! How it works
 
-* ''notebook'' (default) — the gateway re-fetches your notes from a wiki configured server-side in its `config.yaml`. All features work.
-* ''local'' — this wiki sends its own note content with each request, so ''Ask AI'' and ''Related notes'' work against ''any'' TiddlyWiki, even one the gateway has no configuration or credentials for. Payloads are minimized through the gateway's content-addressed note cache: each note is hashed (sha256), the gateway is asked which hashes it is missing, and only those travel in full — unchanged notes cost a few bytes per question. Reload the wiki after changing the mode.
+This wiki sends its own note content with each request, so every feature works against ''any'' TiddlyWiki — the gateway needs no configuration or credentials for it. Payloads are minimized through the gateway's content-addressed note cache: each note is hashed (sha256), the gateway is asked which hashes it is missing, and only those travel in full — unchanged notes cost a few bytes per question. ''Summarize'', ''Suggest tags'' and ''Extract tasks'' render the note to plain text in the browser and send that.
 
-Local-mode limits (matching the gateway's): at most 500 notes per question, 50k characters per note, 2M characters total — overflow is dropped and the answer is annotated with how many notes were searched (narrow the filter to control which). ''Summarize'', ''Suggest tags'' and ''Extract tasks'' still require a server-configured notebook, as do saved-chat notes syncing anywhere — everything else about chats works locally.
+Limits (matching the gateway's): at most 500 notes per question, 50k characters per note, 2M characters total — overflow is dropped and the answer is annotated with how many notes were searched (narrow the filter to control which).
 
 !! Features
 

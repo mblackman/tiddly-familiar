@@ -1,12 +1,12 @@
-"""Headless end-to-end check of the plugin's LOCAL mode against the dev wiki.
+"""Headless end-to-end check of the (local-only) plugin against the dev wiki.
 
 Runs INSIDE the gateway container (docker cp + docker exec), like
-verify_plugin_headless.py. Flips the plugin config to Mode=local and — the
-no-Playwright proof — Notebook=no-such-notebook: any code path that still
-touches /notebooks/{nb}/... gets a 404 and fails the asserts. Exercises the
-streaming ask over locally-collected notes, the content-addressed cache
-(second ask must be all hash refs → cache.hits > 0), history follow-up, and
-local related-notes. Restores all config and cleans up afterwards.
+verify_plugin_headless.py. The plugin sends note content with every request;
+a network tripwire records any request touching /notebooks/ and fails the
+run (the plugin must never use the notebook routes). Exercises the streaming
+ask over locally-collected notes, the content-addressed cache (second ask
+must be all hash refs → cache.hits > 0), history follow-up, local
+related-notes, and browser-rendered Summarize. Restores config and cleans up.
 """
 
 import asyncio
@@ -66,18 +66,21 @@ async def main():
         page = await browser.new_page()
         page.on("console", lambda m: m.text.startswith("[ai-gateway]") and print("console:", m.text))
         page.on("pageerror", lambda e: print("PAGEERROR:", e))
+        # Tripwire: the local-only plugin must never touch the notebook routes.
+        # (The wiki's own syncer talks to tw-dev, not the gateway, so any
+        # /notebooks/ request can only come from the plugin.)
+        notebook_requests = []
+        page.on(
+            "request",
+            lambda r: "/notebooks/" in r.url and notebook_requests.append(r.url),
+        )
 
         await page.goto(WIKI, wait_until="load")
         await wait_ready(page)
-        originals = {}
-        for name in ("GatewayURL", "Notebook", "Mode"):
-            originals[name] = await get_text(page, CFG_PREFIX + name)
-        print("original config:", originals)
+        original_url = await get_text(page, CFG_PREFIX + "GatewayURL")
+        print("original GatewayURL:", original_url)
 
         await set_tiddler(page, CFG_PREFIX + "GatewayURL", IN_NET_URL)
-        await set_tiddler(page, CFG_PREFIX + "Mode", "local")
-        # The tripwire: if anything still calls /notebooks/{nb}/..., it 404s.
-        await set_tiddler(page, CFG_PREFIX + "Notebook", "no-such-notebook")
         for title, text in SEEDS.items():
             await set_tiddler(page, title, text)
         await asyncio.sleep(4)  # let the syncer push config + seeds
@@ -87,7 +90,7 @@ async def main():
         await asyncio.sleep(2)
         debug = await get_text(page, "$:/temp/ai-gateway/debug")
         print("debug:", debug)
-        assert "mode=local" in debug, f"plugin not in local mode: {debug}"
+        assert "(local mode)" in debug, f"unexpected startup banner: {debug}"
 
         # --- streaming ask over locally-collected notes ---
         await set_tiddler(page, "$:/state/ai-gateway/question",
@@ -152,12 +155,33 @@ async def main():
         print("related:", related)
         assert "Okapi Notes" in related, f"related missed the striped neighbour: {related!r}"
 
+        # --- summarize: browser-rendered text through the client /generate ---
+        await page.evaluate(
+            "() => $tw.rootWidget.dispatchEvent({type: 'tm-summarize-tiddler', param: 'Zebra Facts'})"
+        )
+        summary = ""
+        for _ in range(120):
+            await asyncio.sleep(0.5)
+            summary = await page.evaluate(
+                "() => { var t = $tw.wiki.getTiddler('Zebra Facts');"
+                " return (t && t.fields.summary) || ''; }"
+            )
+            if summary:
+                break
+        print("summary:", summary[:120])
+        assert summary, "summarize wrote no summary field"
+
+        # --- the tripwire must not have fired ---
+        assert not notebook_requests, \
+            f"plugin touched notebook routes: {notebook_requests}"
+
         # --- restore config, remove seeds and session state ---
-        for name, value in originals.items():
-            if value:
-                await set_tiddler(page, CFG_PREFIX + name, value)
-            else:
-                await page.evaluate("(t) => $tw.wiki.deleteTiddler(t)", CFG_PREFIX + name)
+        if original_url:
+            await set_tiddler(page, CFG_PREFIX + "GatewayURL", original_url)
+        else:
+            await page.evaluate(
+                "(t) => $tw.wiki.deleteTiddler(t)", CFG_PREFIX + "GatewayURL"
+            )
         await page.evaluate(
             "(ts) => ts.forEach(t => $tw.wiki.deleteTiddler(t))", list(SEEDS)
         )
