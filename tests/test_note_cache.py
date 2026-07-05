@@ -6,7 +6,7 @@ import time
 from app.note_cache import NoteCache, canonical_hash
 
 # Parity vectors shared with the JS implementation in
-# plugins/mblackman/ai-gateway/src/startup.js — if either side changes its
+# plugins/mblackman/familiar/src/startup.js — if either side changes its
 # canonical form, both this test and the plugin's vector comment must move
 # together, otherwise local-mode clients silently lose all cache hits.
 PARITY_VECTORS = [

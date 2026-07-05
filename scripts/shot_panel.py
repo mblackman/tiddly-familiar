@@ -1,4 +1,4 @@
-"""Screenshot the Ask AI sidebar panel in the dev wiki (run via
+"""Screenshot the Familiar sidebar panel in the dev wiki (run via
 scripts/run_headless.sh, like verify_plugin_headless.py). Seeds a fake
 transcript so the bubble layout is visible, grabs the panel, then cleans up."""
 
@@ -26,15 +26,15 @@ async def main():
              ["000003","user","Which port does it listen on?"],
              ["000004","assistant","It listens on ports 80 and 443 on the TrueNAS host."]]
             .forEach(([n, role, text]) => $tw.wiki.addTiddler(new $tw.Tiddler(
-                {title: "$:/temp/ai-gateway/chat/" + n, role: role, text: text,
+                {title: "$:/temp/familiar/chat/" + n, role: role, text: text,
                  type: role === "assistant" ? "text/markdown" : undefined})));
         }""")
-        await page.click("text=Ask AI")
+        await page.click("text=Familiar")
         await asyncio.sleep(1)
-        panel = page.locator(".ai-gw-panel")
+        panel = page.locator(".fam-panel")
         await panel.screenshot(path=OUT)
         await page.evaluate(
-            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/]] [prefix[$:/state/ai-gateway/]]')"
+            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/]] [prefix[$:/state/familiar/]]')"
             ".forEach(t => $tw.wiki.deleteTiddler(t))"
         )
         await browser.close()

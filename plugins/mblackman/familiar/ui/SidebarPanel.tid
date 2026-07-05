@@ -1,0 +1,178 @@
+\define fam-clear-chat()
+<$action-deletetiddler $filter="[prefix[$:/temp/familiar/chat/]]"/>
+<$action-setfield $tiddler="$:/state/familiar/chat-note" text=""/>
+<$action-setfield $tiddler="$:/state/familiar/answer" text=""/>
+<$action-setfield $tiddler="$:/state/familiar/sources" text=""/>
+<$action-setfield $tiddler="$:/state/familiar/sources-open" text="no"/>
+\end
+
+\define fam-transcript(prefix)
+<$list filter="[prefix[$prefix$]sort[title]]" variable="turn">
+<$vars turnClass={{{ [<turn>get[role]match[user]then[fam-turn fam-turn-user]else[fam-turn fam-turn-ai]] }}}>
+<div class=<<turnClass>>>
+<$transclude tiddler=<<turn>> mode="block"/>
+</div>
+</$vars>
+</$list>
+\end
+
+<div class="fam-panel">
+
+<div class="fam-brand">
+<span class="fam-brand-mark">{{$:/plugins/mblackman/familiar/icon}}</span>
+<span class="fam-brand-text">
+<span class="fam-brand-name">Familiar</span>
+<span class="fam-brand-tag">your wiki's AI companion</span>
+</span>
+</div>
+
+<div class="fam-chat-head">
+<$reveal state="$:/state/familiar/chat-note" type="nomatch" text="" tag="span">
+<span class="fam-chat-bound">Saving to <$link to={{$:/state/familiar/chat-note}}><$text text={{$:/state/familiar/chat-note}}/></$link></span>
+</$reveal>
+<span class="fam-chat-head-spacer"></span>
+<$button class="fam-preset" tooltip="Start a fresh chat saved to a note from the first turn">
+<$action-setfield $tiddler="$:/state/familiar/new-note-open" text={{{ [{$:/state/familiar/new-note-open}match[yes]then[no]else[yes]] }}}/>
+<$list filter="[{$:/state/familiar/new-note-open}!match[yes]]" variable="ignore-opening">
+<$action-sendmessage $message="tm-new-chat-title"/>
+</$list>
+New note
+</$button>
+<$reveal state="$:/state/familiar/chat-note" type="match" text="" tag="span">
+<$list filter="[prefix[$:/temp/familiar/chat/]limit[1]]" variable="ignore-has-chat">
+<$button class="fam-preset" tooltip="Save this conversation as a note so it survives reload and keeps growing">
+<$action-sendmessage $message="tm-save-chat"/>
+Save chat
+</$button>
+<$button class="fam-preset" tooltip="Forget this conversation and start over">
+<<fam-clear-chat>>
+New chat
+</$button>
+</$list>
+</$reveal>
+<$reveal state="$:/state/familiar/chat-note" type="nomatch" text="" tag="span">
+<$button class="fam-preset" tooltip="Start a new conversation (the saved note keeps this one)">
+<<fam-clear-chat>>
+New chat
+</$button>
+</$reveal>
+</div>
+
+<$reveal state="$:/state/familiar/new-note-open" type="match" text="yes" tag="div">
+<div class="fam-newnote-row">
+<$keyboard key="enter" class="fam-newnote-input" actions="""<$action-sendmessage $message="tm-new-chat-note"/>""">
+<$edit-text tiddler="$:/state/familiar/new-chat-title" tag="input" placeholder="Note title…"/>
+</$keyboard>
+<$button class="fam-preset" tooltip="Roll another name">
+<$action-sendmessage $message="tm-new-chat-title"/>
+<svg class="fam-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.5" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.5" fill="currentColor"/></svg>
+</$button>
+<$button class="fam-preset" tooltip="Create the note and chat into it (Enter)">
+<$action-sendmessage $message="tm-new-chat-note"/>
+Create
+</$button>
+<$button class="tc-btn-invisible fam-btn-clear" tooltip="Cancel">
+<$action-setfield $tiddler="$:/state/familiar/new-note-open" text="no"/>
+&times;
+</$button>
+</div>
+</$reveal>
+
+<div class="fam-chat-log">
+
+<$reveal state="$:/state/familiar/chat-note" type="match" text="" tag="div">
+<$list filter="[prefix[$:/temp/familiar/chat/]limit[1]]" variable="ignore-has-chat" emptyMessage="""<div class="fam-empty"><svg class="fam-empty-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg><br/>Ask anything about your notes</div>""">
+<div class="fam-chat">
+<<fam-transcript "$:/temp/familiar/chat/">>
+</div>
+</$list>
+</$reveal>
+<$reveal state="$:/state/familiar/chat-note" type="nomatch" text="" tag="div">
+<div class="fam-chat">
+<$macrocall $name="fam-transcript" prefix={{{ [{$:/state/familiar/chat-note}addsuffix[/turn/]] }}}/>
+</div>
+</$reveal>
+
+<$reveal state="$:/state/familiar/asking" type="match" text="yes" tag="div">
+<$reveal state="$:/state/familiar/answer" type="match" text="" tag="div">
+<div class="fam-turn fam-turn-ai fam-turn-typing"><span class="fam-typing"><span></span><span></span><span></span></span></div>
+</$reveal>
+<$reveal state="$:/state/familiar/answer" type="nomatch" text="" tag="div">
+<div class="fam-turn fam-turn-ai fam-turn-streaming">
+<$transclude tiddler="$:/state/familiar/answer" mode="block"/>
+<span class="fam-spinner"></span>
+</div>
+</$reveal>
+</$reveal>
+
+<$reveal state="$:/state/familiar/asking" type="nomatch" text="yes" tag="div">
+<$reveal state="$:/state/familiar/answer" type="nomatch" text="" tag="div">
+<div class="fam-turn fam-turn-ai fam-turn-error">
+<$button class="tc-btn-invisible fam-btn-clear" tooltip="Dismiss"><$action-setfield $tiddler="$:/state/familiar/answer" text=""/>&times;</$button>
+<$transclude tiddler="$:/state/familiar/answer" mode="block"/>
+</div>
+</$reveal>
+</$reveal>
+
+<$reveal state="$:/state/familiar/sources" type="nomatch" text="" tag="div">
+<div class="fam-sources">
+<$button class="tc-btn-invisible fam-sources-toggle">
+<$action-setfield $tiddler="$:/state/familiar/sources-open" text={{{ [{$:/state/familiar/sources-open}match[yes]then[no]else[yes]] }}}/>
+<$reveal state="$:/state/familiar/sources-open" type="match" text="yes" tag="span">▾ Sources</$reveal><$reveal state="$:/state/familiar/sources-open" type="nomatch" text="yes" tag="span">▸ Sources</$reveal>
+</$button>
+<$reveal state="$:/state/familiar/sources-open" type="match" text="yes" tag="div">
+<div class="fam-sources-list">{{$:/state/familiar/sources}}</div>
+</$reveal>
+</div>
+</$reveal>
+
+</div>
+
+<div class="fam-composer">
+
+<$reveal state="$:/state/familiar/filter-open" type="match" text="yes" tag="div">
+<div class="fam-filter-row">
+<$edit-text tiddler="$:/state/familiar/filter" tag="input" placeholder="[!is[system]]"/>
+<div class="fam-presets">
+<$button class="fam-preset" tooltip="Search every note (clears the filter)">
+<$action-setfield $tiddler="$:/state/familiar/filter" text=""/>
+everything
+</$button>
+<$button class="fam-preset" tooltip="Only the note currently open in the story">
+<$action-setfield $tiddler="$:/state/familiar/filter" text={{{ [{$:/HistoryList!!current-tiddler}format:titlelist[]] }}}/>
+this note
+</$button>
+<$button class="fam-preset" tooltip="Notes sharing the open note's first tag">
+<$vars lb="[tag[" rb="]]">
+<$action-setfield $tiddler="$:/state/familiar/filter" text={{{ [{$:/HistoryList!!current-tiddler}get[tags]enlist-input[]first[]addprefix<lb>addsuffix<rb>] }}}/>
+</$vars>
+its tag
+</$button>
+</div>
+</div>
+</$reveal>
+
+<div class="fam-composer-row">
+<$vars filterBtnClass={{{ [{$:/state/familiar/filter}!match[]then[tc-btn-invisible fam-filter-toggle fam-filter-active]else[tc-btn-invisible fam-filter-toggle]] }}}>
+<$button class=<<filterBtnClass>> tooltip="Limit which notes the AI searches">
+<$action-setfield $tiddler="$:/state/familiar/filter-open" text={{{ [{$:/state/familiar/filter-open}match[yes]then[no]else[yes]] }}}/>
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/></svg>
+</$button>
+</$vars>
+<$keyboard key="enter" class="fam-input-wrap" actions="""<$action-sendmessage $message="tm-ask-ai"/>""">
+<$edit-text tiddler="$:/state/familiar/question" tag="textarea" rows="1" autoHeight="yes" minHeight="0px" placeholder="Ask your notes…" class="fam-input"/>
+</$keyboard>
+<$reveal state="$:/state/familiar/asking" type="nomatch" text="yes" tag="span">
+<$button class="fam-send" tooltip="Send (Enter)">
+<$action-sendmessage $message="tm-ask-ai"/>
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+</$button>
+</$reveal>
+<$reveal state="$:/state/familiar/asking" type="match" text="yes" tag="span">
+<span class="fam-send fam-send-busy"><span class="fam-spinner"></span></span>
+</$reveal>
+</div>
+
+</div>
+
+</div>

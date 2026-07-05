@@ -13,7 +13,7 @@ import json
 from playwright.async_api import async_playwright
 
 WIKI = "http://tw-dev:8080"
-CFG = "$:/config/mblackman/ai-gateway/GatewayURL"
+CFG = "$:/config/mblackman/familiar/GatewayURL"
 IN_NET_URL = "http://gateway:8787"
 
 
@@ -49,7 +49,7 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
-        page.on("console", lambda m: m.text.startswith("[ai-gateway]") and print("console:", m.text))
+        page.on("console", lambda m: m.text.startswith("[familiar]") and print("console:", m.text))
         page.on("pageerror", lambda e: print("PAGEERROR:", e))
 
         await page.goto(WIKI, wait_until="load")
@@ -63,25 +63,25 @@ async def main():
         await page.goto(WIKI, wait_until="load")
         await wait_ready(page)
         await asyncio.sleep(2)
-        print("debug:", await get_text(page, "$:/temp/ai-gateway/debug"))
+        print("debug:", await get_text(page, "$:/temp/familiar/debug"))
 
         # --- new chat note: templated title + reroll + create ---
-        tpl_cfg = "$:/config/mblackman/ai-gateway/ChatNoteTemplate"
+        tpl_cfg = "$:/config/mblackman/familiar/ChatNoteTemplate"
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-title'})")
-        title1 = await get_text(page, "$:/state/ai-gateway/new-chat-title")
+        title1 = await get_text(page, "$:/state/familiar/new-chat-title")
         print("proposed title (default template):", repr(title1))
         assert title1.startswith("AI Chat: "), "default template not applied"
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-title'})")
-        title2 = await get_text(page, "$:/state/ai-gateway/new-chat-title")
+        title2 = await get_text(page, "$:/state/familiar/new-chat-title")
         print("rerolled title:", repr(title2))
         assert title2.startswith("AI Chat: "), "reroll broke the template"
         await set_tiddler(page, tpl_cfg, "Chat {date} {name}")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-title'})")
-        title3 = await get_text(page, "$:/state/ai-gateway/new-chat-title")
+        title3 = await get_text(page, "$:/state/familiar/new-chat-title")
         print("custom-template title:", repr(title3))
         assert title3.startswith("Chat 2"), f"custom template not applied: {title3!r}"
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-note'})")
-        new_note = await get_text(page, "$:/state/ai-gateway/chat-note")
+        new_note = await get_text(page, "$:/state/familiar/chat-note")
         print("new chat note bound:", repr(new_note))
         assert new_note == title3, "panel not bound to the new note"
         note_fields = await page.evaluate(
@@ -90,14 +90,14 @@ async def main():
             new_note,
         )
         assert note_fields and "ai-chat" in note_fields["tags"], "new note missing ai-chat tag"
-        assert await get_text(page, "$:/state/ai-gateway/new-chat-title") == "", \
+        assert await get_text(page, "$:/state/familiar/new-chat-title") == "", \
             "proposed title not cleared after create"
         story = await page.evaluate("() => $tw.wiki.getTiddlerList('$:/StoryList')")
         assert new_note in story, "new note not opened in the story"
         # user-typed titles get sanitized of filter-breaking chars
-        await set_tiddler(page, "$:/state/ai-gateway/new-chat-title", "My [weird] {chat}")
+        await set_tiddler(page, "$:/state/familiar/new-chat-title", "My [weird] {chat}")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-note'})")
-        weird_note = await get_text(page, "$:/state/ai-gateway/chat-note")
+        weird_note = await get_text(page, "$:/state/familiar/chat-note")
         print("sanitized note title:", repr(weird_note))
         assert weird_note == "My weird chat", f"title not sanitized: {weird_note!r}"
         # clean up the created notes + config so the button click sees defaults
@@ -105,11 +105,11 @@ async def main():
             "(ts) => ts.forEach(t => $tw.wiki.deleteTiddler(t))",
             [new_note, weird_note, tpl_cfg],
         )
-        await set_tiddler(page, "$:/state/ai-gateway/chat-note", "")
+        await set_tiddler(page, "$:/state/familiar/chat-note", "")
 
         # --- "new AI chat" page-control button: one tap = generated note ---
         await page.click('button[aria-label="new AI chat"]')
-        btn_note = await get_text(page, "$:/state/ai-gateway/chat-note")
+        btn_note = await get_text(page, "$:/state/familiar/chat-note")
         print("page-control button created:", repr(btn_note))
         assert btn_note.startswith("AI Chat: "), "button did not create a templated note"
         btn_tags = await page.evaluate(
@@ -120,7 +120,7 @@ async def main():
         assert btn_note in story, "button note not opened in the story"
         # clean up: drop the note, unbind, and take the test notes off the river
         await page.evaluate("(n) => $tw.wiki.deleteTiddler(n)", btn_note)
-        await set_tiddler(page, "$:/state/ai-gateway/chat-note", "")
+        await set_tiddler(page, "$:/state/familiar/chat-note", "")
         await page.evaluate(
             "(ts) => { var sl = $tw.wiki.getTiddler('$:/StoryList'); if (!sl) return; "
             "$tw.wiki.addTiddler(new $tw.Tiddler(sl, "
@@ -130,20 +130,20 @@ async def main():
         print("new-chat-note flow OK")
 
         # --- streaming ask ---
-        await set_tiddler(page, "$:/state/ai-gateway/question", "What is Caddy used for?")
+        await set_tiddler(page, "$:/state/familiar/question", "What is Caddy used for?")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
         growth = []
         for _ in range(120):
             await asyncio.sleep(0.5)
-            asking = await get_text(page, "$:/state/ai-gateway/asking")
-            partial = await get_text(page, "$:/state/ai-gateway/answer")
+            asking = await get_text(page, "$:/state/familiar/asking")
+            partial = await get_text(page, "$:/state/familiar/answer")
             if len(partial) and (not growth or len(partial) != growth[-1]):
                 growth.append(len(partial))
             if asking == "no":
                 break
         print("partial-answer growth samples:", growth[:10], "…" if len(growth) > 10 else "")
         turns = await page.evaluate(
-            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/chat/]sort[title]]')"
+            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/chat/]sort[title]]')"
             ".map(t => { var f = $tw.wiki.getTiddler(t).fields; "
             "return {title: t, role: f.role, type: f.type, sources: f.sources, len: (f.text||'').length}; })"
         )
@@ -152,14 +152,14 @@ async def main():
         assert len(growth) >= 2, "answer state never grew incrementally — streaming broken?"
 
         # --- follow-up uses history ---
-        await set_tiddler(page, "$:/state/ai-gateway/question", "Which port does it listen on?")
+        await set_tiddler(page, "$:/state/familiar/question", "Which port does it listen on?")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
         for _ in range(120):
             await asyncio.sleep(0.5)
-            if await get_text(page, "$:/state/ai-gateway/asking") == "no":
+            if await get_text(page, "$:/state/familiar/asking") == "no":
                 break
         turns = await page.evaluate(
-            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/chat/]sort[title]]')"
+            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/chat/]sort[title]]')"
             ".map(t => $tw.wiki.getTiddler(t).fields.text)"
         )
         print("follow-up answer mentions caddy:", "addy" in turns[-1])
@@ -167,11 +167,11 @@ async def main():
 
         # --- save chat: transcript becomes a real note + turn tiddlers ---
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-save-chat'})")
-        note = await get_text(page, "$:/state/ai-gateway/chat-note")
+        note = await get_text(page, "$:/state/familiar/chat-note")
         print("chat saved to note:", repr(note))
         assert note.startswith("AI Chat: "), "chat-note state not set after save"
         temp_left = await page.evaluate(
-            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/chat/]]').length"
+            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/chat/]]').length"
         )
         assert temp_left == 0, f"{temp_left} temp turns left after save"
         saved = await page.evaluate(
@@ -188,15 +188,15 @@ async def main():
         assert "ai-chat" in note_tags, "chat note not tagged ai-chat"
 
         # --- next turn lands in the note while bound ---
-        await set_tiddler(page, "$:/state/ai-gateway/question", "Summarize that in one sentence.")
+        await set_tiddler(page, "$:/state/familiar/question", "Summarize that in one sentence.")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
         for _ in range(120):
             await asyncio.sleep(0.5)
-            if await get_text(page, "$:/state/ai-gateway/asking") == "no":
+            if await get_text(page, "$:/state/familiar/asking") == "no":
                 break
         counts = await page.evaluate(
             "(n) => [$tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]]').length,"
-            " $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/chat/]]').length]",
+            " $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/chat/]]').length]",
             note,
         )
         print("turns in note / temp after bound ask:", counts)
@@ -217,17 +217,17 @@ async def main():
         await page.evaluate(
             "(n) => $tw.rootWidget.dispatchEvent({type: 'tm-resume-chat', param: n})", note
         )
-        assert await get_text(page, "$:/state/ai-gateway/chat-note") == note, "resume did not re-bind"
+        assert await get_text(page, "$:/state/familiar/chat-note") == note, "resume did not re-bind"
         print("resume re-bound the panel to the note")
 
         # --- in-note composer: ask directly from the chat note ---
-        await set_tiddler(page, "$:/state/ai-gateway/note-question/" + note, "And what is AdGuard for?")
+        await set_tiddler(page, "$:/state/familiar/note-question/" + note, "And what is AdGuard for?")
         await page.evaluate(
             "(n) => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai-note', param: n})", note
         )
         for _ in range(120):
             await asyncio.sleep(0.5)
-            if await get_text(page, "$:/state/ai-gateway/note-asking/" + note) == "no":
+            if await get_text(page, "$:/state/familiar/note-asking/" + note) == "no":
                 break
         in_note = await page.evaluate(
             "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]sort[title]]')"
@@ -237,7 +237,7 @@ async def main():
         print("roles after in-note ask:", in_note)
         assert len(in_note) == 8 and in_note[-2:] == ["user", "assistant"], \
             f"in-note ask did not append turns: {in_note}"
-        assert await get_text(page, "$:/state/ai-gateway/note-question/" + note) == "", \
+        assert await get_text(page, "$:/state/familiar/note-question/" + note) == "", \
             "in-note question not cleared after send"
 
         # Remove the (real, synced) chat note + turns so reruns start clean.
@@ -253,7 +253,7 @@ async def main():
         )
         for _ in range(120):
             await asyncio.sleep(0.5)
-            tags = await get_text(page, "$:/temp/ai-gateway/tags/Caddy")
+            tags = await get_text(page, "$:/temp/familiar/tags/Caddy")
             if tags:
                 break
         print("suggested tags:", tags)
@@ -265,7 +265,7 @@ async def main():
         )
         for _ in range(120):
             await asyncio.sleep(0.5)
-            tasks = await get_text(page, "$:/temp/ai-gateway/tasks/Caddy")
+            tasks = await get_text(page, "$:/temp/familiar/tasks/Caddy")
             if tasks:
                 break
         print("tasks:", tasks[:120])
@@ -274,7 +274,7 @@ async def main():
         # Restore the real config and clean the session state.
         await set_tiddler(page, CFG, original_url or "https://gw.lab.cc")
         await page.evaluate(
-            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/]] [prefix[$:/state/ai-gateway/]]')"
+            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/]] [prefix[$:/state/familiar/]]')"
             ".forEach(t => $tw.wiki.deleteTiddler(t))"
         )
         await asyncio.sleep(4)

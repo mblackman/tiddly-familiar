@@ -7,7 +7,7 @@ set -euo pipefail
 
 script="${1:?usage: scripts/run_headless.sh scripts/<script>.py}"
 image="mcr.microsoft.com/playwright/python:v1.49.0-noble"
-network="tiddlypwa-gateway_default"
+network="${HEADLESS_NETWORK:-tiddly-familiar_default}"
 name="tpwa-headless-$$"
 
 docker run -d --name "$name" --network "$network" "$image" sleep infinity >/dev/null

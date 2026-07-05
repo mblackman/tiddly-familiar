@@ -16,7 +16,7 @@ import json
 from playwright.async_api import async_playwright
 
 WIKI = "http://tw-dev:8080"
-CFG_PREFIX = "$:/config/mblackman/ai-gateway/"
+CFG_PREFIX = "$:/config/mblackman/familiar/"
 IN_NET_URL = "http://gateway:8787"
 
 SEEDS = {
@@ -49,11 +49,11 @@ async def get_text(page, title):
     return await page.evaluate("(t) => $tw.wiki.getTiddlerText(t, '')", title)
 
 
-async def wait_done(page, state="$:/state/ai-gateway/asking"):
+async def wait_done(page, state="$:/state/familiar/asking"):
     growth = []
     for _ in range(480):
         await asyncio.sleep(0.125)
-        partial = await get_text(page, "$:/state/ai-gateway/answer")
+        partial = await get_text(page, "$:/state/familiar/answer")
         if len(partial) and (not growth or len(partial) != growth[-1]):
             growth.append(len(partial))
         if await get_text(page, state) == "no":
@@ -66,7 +66,7 @@ async def ask_stream_probe(page, question):
     return await page.evaluate(
         "(q) => new Promise((resolve, reject) => {"
         "  var deltas = 0;"
-        "  $tw.TiddlyPWAGateway.askStream(q, null, null, {"
+        "  $tw.Familiar.askStream(q, null, null, {"
         "    onDelta: function() { deltas += 1; },"
         "    onDone: function(data) { resolve({deltas: deltas, cache: data.cache || null,"
         "      answered: !!(data.answer || '').length}); }"
@@ -80,7 +80,7 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
-        page.on("console", lambda m: m.text.startswith("[ai-gateway]") and print("console:", m.text))
+        page.on("console", lambda m: m.text.startswith("[familiar]") and print("console:", m.text))
         page.on("pageerror", lambda e: print("PAGEERROR:", e))
         # Tripwire: the local-only plugin must never touch the notebook routes.
         # (The wiki's own syncer talks to tw-dev, not the gateway, so any
@@ -111,7 +111,7 @@ async def main():
         await page.goto(WIKI, wait_until="load")
         await wait_ready(page)
         await asyncio.sleep(2)
-        debug = await get_text(page, "$:/temp/ai-gateway/debug")
+        debug = await get_text(page, "$:/temp/familiar/debug")
         print("debug:", debug)
         # The warm-done message may have already overwritten the ready banner
         # (dbg is a single tiddler); either one proves the local-mode startup.
@@ -121,7 +121,7 @@ async def main():
         # --- background warm: idle scan + /notes/check + /notes/sync ---
         status = ""
         for _ in range(180):
-            status = await get_text(page, "$:/temp/ai-gateway/sync-status")
+            status = await get_text(page, "$:/temp/familiar/sync-status")
             if status in ("ready", "degraded"):
                 break
             await asyncio.sleep(0.5)
@@ -148,13 +148,13 @@ async def main():
             f"steady-state ask still preflights /notes/check: {check_requests}"
 
         # --- streaming ask over locally-collected notes ---
-        await set_tiddler(page, "$:/state/ai-gateway/question",
+        await set_tiddler(page, "$:/state/familiar/question",
                           "Using Zebra Facts, explain in detail (several sentences) "
                           "what is unique about each zebra and where zebras live.")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
         await wait_done(page)
         turns = await page.evaluate(
-            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/chat/]sort[title]]')"
+            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/chat/]sort[title]]')"
             ".map(t => { var f = $tw.wiki.getTiddler(t).fields; "
             "return {role: f.role, sources: f.sources || '', len: (f.text||'').length}; })"
         )
@@ -182,12 +182,12 @@ async def main():
             f"ask after edit still preflights /notes/check: {check_requests}"
 
         # --- follow-up uses history ---
-        await set_tiddler(page, "$:/state/ai-gateway/question",
+        await set_tiddler(page, "$:/state/familiar/question",
                           "Where does that second animal live?")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
         await wait_done(page)
         n_turns = await page.evaluate(
-            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/chat/]]').length"
+            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/chat/]]').length"
         )
         assert n_turns == 4, f"expected 4 turns after follow-up, got {n_turns}"
         print("follow-up OK")
@@ -199,7 +199,7 @@ async def main():
         related = ""
         for _ in range(120):
             await asyncio.sleep(0.5)
-            related = await get_text(page, "$:/temp/ai-gateway/related/Zebra Facts")
+            related = await get_text(page, "$:/temp/familiar/related/Zebra Facts")
             if related:
                 break
         print("related:", related)
@@ -236,7 +236,7 @@ async def main():
             "(ts) => ts.forEach(t => $tw.wiki.deleteTiddler(t))", list(SEEDS)
         )
         await page.evaluate(
-            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/ai-gateway/]] [prefix[$:/state/ai-gateway/]]')"
+            "() => $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/]] [prefix[$:/state/familiar/]]')"
             ".forEach(t => $tw.wiki.deleteTiddler(t))"
         )
         await asyncio.sleep(4)

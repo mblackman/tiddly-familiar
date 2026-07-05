@@ -1,0 +1,19 @@
+Point the plugin at your [[Familiar|https://github.com/mblackman/tiddly-familiar]] server. Changes take effect on the next request — no reload needed.
+
+!!! Gateway URL
+
+Base URL of the gateway server (a trailing slash is ignored):
+
+<$edit-text tiddler="$:/config/mblackman/familiar/GatewayURL" tag="input" default="" placeholder="http://localhost:8787" class="fam-settings-input"/>
+
+!!! API key
+
+The `GATEWAY_API_KEY` value from the gateway's `.env`, sent as the `X-API-Key` header. Leave empty if the gateway runs without one:
+
+<$edit-text tiddler="$:/config/mblackman/familiar/APIKey" tag="input" type="password" default="" class="fam-settings-input"/>
+
+!!! Chat note title template
+
+Proposed title for notes created by ''New note'' and the ''new AI chat'' page button. Tokens: `{name}` (random adjective-noun), `{date}` (YYYY-MM-DD), `{time}` (HH:MM):
+
+<$edit-text tiddler="$:/config/mblackman/familiar/ChatNoteTemplate" tag="input" default="" placeholder="AI Chat: {name}" class="fam-settings-input"/>

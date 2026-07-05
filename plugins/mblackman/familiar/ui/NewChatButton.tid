@@ -1,6 +1,6 @@
 \whitespace trim
 <$button tooltip="Create an AI chat note with a generated title" aria-label="new AI chat" class=<<tv-config-toolbar-class>>>
-<$action-setfield $tiddler="$:/state/ai-gateway/new-chat-title" text=""/>
+<$action-setfield $tiddler="$:/state/familiar/new-chat-title" text=""/>
 <$action-sendmessage $message="tm-new-chat-note"/>
 <$list filter="[<tv-config-toolbar-icons>match[yes]]" variable="ignore">
 <svg class="tc-image-button" width="22pt" height="22pt" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd"><path d="M4 2h16a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H10l-5 4.5V18H4a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3z M11 6h2v3h3v2h-3v3h-2v-3H8V9h3V6z"/></svg>

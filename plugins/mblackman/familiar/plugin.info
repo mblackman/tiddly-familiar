@@ -1,0 +1,15 @@
+{
+    "title": "$:/plugins/mblackman/familiar",
+    "name": "familiar",
+    "description": "Familiar — an AI familiar for your wiki: streaming chat, summaries, tag/task suggestions, and related notes.",
+    "author": "mblackman",
+    "version": "0.9.0",
+    "core-version": ">=5.3.0",
+    "source": "https://github.com/mblackman/tiddly-familiar",
+    "documentation": "$:/plugins/mblackman/familiar/Readme",
+    "icon": "$:/plugins/mblackman/familiar/icon",
+    "plugin-type": "plugin",
+    "list": "Readme",
+    "stability": "STABILITY_1_EXPERIMENTAL",
+    "type": "application/json"
+}

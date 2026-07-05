@@ -1,6 +1,7 @@
-# Secrets and local config (use config.example.yaml as the template)
+# Secrets and local config (use .env.example as the template)
 .env
 .env.*
+!.env.example
 config.yaml
 
 # Local CA cert — machine-specific, not for public repos

@@ -4,7 +4,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const PLUGIN_ROOT = path.join(__dirname, "..", "plugins", "mblackman", "ai-gateway");
+const PLUGIN_ROOT = path.join(__dirname, "..", "plugins", "mblackman", "familiar");
 const BUILD_DIR = path.join(__dirname, "..", "build");
 
 const pluginInfo = JSON.parse(
@@ -35,6 +35,6 @@ const header = Object.entries(pluginInfo)
 const tid = `${header}\ntype: application/json\n\n${pluginBody}\n`;
 
 fs.mkdirSync(BUILD_DIR, { recursive: true });
-const outPath = path.join(BUILD_DIR, "ai-gateway.tid");
+const outPath = path.join(BUILD_DIR, "familiar.tid");
 fs.writeFileSync(outPath, tid, "utf8");
 console.log(`Built ${outPath} (${Object.keys(tiddlers).length} tiddlers)`);

@@ -36,7 +36,7 @@ async def main():
         frame = page.locator("div[data-tiddler-title='" + NOTE + "']")
         await frame.screenshot(path=OUT)
         await page.evaluate(
-            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + ']] [prefix[$:/state/ai-gateway/]]')"
+            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + ']] [prefix[$:/state/familiar/]]')"
             ".forEach(t => $tw.wiki.deleteTiddler(t))", NOTE
         )
         await browser.close()

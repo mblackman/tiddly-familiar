@@ -10,7 +10,7 @@ concurrency:
     cancel-in-progress: false
 
 env:
-    IMAGE: ghcr.io/mblackman/tiddlypwa-gateway
+    IMAGE: ghcr.io/mblackman/tiddly-familiar
 
 jobs:
     release:
@@ -33,7 +33,7 @@ jobs:
             - name: Verify plugin.info version matches tag
               run: |
                   TAG="${GITHUB_REF_NAME#v}"
-                  PLUGIN_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('./plugins/mblackman/ai-gateway/plugin.info', 'utf8')).version")
+                  PLUGIN_VERSION=$(node -p "JSON.parse(require('fs').readFileSync('./plugins/mblackman/familiar/plugin.info', 'utf8')).version")
                   echo "Tag version:    $TAG"
                   echo "Plugin version: $PLUGIN_VERSION"
                   if [ "$TAG" != "$PLUGIN_VERSION" ]; then
@@ -61,6 +61,6 @@ jobs:
             - name: Create GitHub Release
               uses: softprops/action-gh-release@v2
               with:
-                  files: build/ai-gateway.tid
+                  files: build/familiar.tid
                   generate_release_notes: true
                   fail_on_unmatched_files: true

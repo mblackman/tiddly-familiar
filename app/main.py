@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
     await _embedder.aclose()
 
 
-app = FastAPI(title="TiddlyPWA Gateway", lifespan=lifespan)
+app = FastAPI(title="Familiar", lifespan=lifespan)
 
 # Permissive CORS for LAN/plugin use. Origin validation is left to the API
 # key — restricting origins here would only help if the key were also secret

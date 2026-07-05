@@ -1,6 +1,6 @@
 services:
   gateway:
-    image: ghcr.io/mblackman/tiddlypwa-gateway:latest
+    image: ghcr.io/mblackman/tiddly-familiar:latest
     build: .
     ports:
       - "8787:8787"

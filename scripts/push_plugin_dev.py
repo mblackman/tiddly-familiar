@@ -3,7 +3,7 @@ TiddlyWiki server API — the plugin-dev inner loop (edit under plugins/ →
 push → reload wiki). The gateway is not involved: it no longer has notebook
 routes or wiki sessions.
 
-Field mapping mirrors plugins/mblackman/ai-gateway/tiddlywiki.files. The
+Field mapping mirrors plugins/mblackman/familiar/tiddlywiki.files. The
 TW5 put-tiddler route pulls a nested `fields` object up into top-level
 tiddler fields, so every extra field goes through `fields`.
 """
@@ -17,7 +17,7 @@ import httpx
 import os
 
 WIKI = os.environ.get("WIKI_URL", "http://claude-docker:8080")
-ROOT = Path(__file__).resolve().parent.parent / "plugins" / "mblackman" / "ai-gateway"
+ROOT = Path(__file__).resolve().parent.parent / "plugins" / "mblackman" / "familiar"
 
 
 def main() -> int:

@@ -1,0 +1,15 @@
+\whitespace trim
+<$reveal state="$:/state/familiar/summarizing" type="match" text=<<currentTiddler>>>
+<button class="tc-btn-invisible" disabled title="Summarizing…"><span class="fam-spinner"></span></button>
+</$reveal>
+<$reveal state="$:/state/familiar/summarizing" type="nomatch" text=<<currentTiddler>>>
+<$button class="tc-btn-invisible" tooltip="Summarize this note with AI" aria-label="summarize">
+<$action-sendmessage $message="tm-summarize-tiddler" $param=<<currentTiddler>>/>
+<$list filter="[<tv-config-toolbar-icons>match[yes]]" variable="ignore">
+<svg class="tc-image-button" width="22pt" height="22pt" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>
+</$list>
+<$list filter="[<tv-config-toolbar-text>match[yes]]" variable="ignore">
+<span class="tc-btn-text">Summarize</span>
+</$list>
+</$button>
+</$reveal>

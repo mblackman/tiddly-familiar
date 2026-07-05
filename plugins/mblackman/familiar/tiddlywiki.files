@@ -4,7 +4,7 @@
             "file": "src/startup.js",
             "fields": {
                 "type": "application/javascript",
-                "title": "$:/plugins/mblackman/ai-gateway/startup.js",
+                "title": "$:/plugins/mblackman/familiar/startup.js",
                 "module-type": "startup"
             }
         },
@@ -12,16 +12,23 @@
             "file": "Readme.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
-                "title": "$:/plugins/mblackman/ai-gateway/Readme",
+                "title": "$:/plugins/mblackman/familiar/Readme",
                 "caption": "Readme"
+            }
+        },
+        {
+            "file": "icon.svg",
+            "fields": {
+                "type": "image/svg+xml",
+                "title": "$:/plugins/mblackman/familiar/icon"
             }
         },
         {
             "file": "ui/SidebarPanel.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
-                "title": "$:/plugins/mblackman/ai-gateway/ui/SidebarPanel",
-                "caption": "Ask AI",
+                "title": "$:/plugins/mblackman/familiar/ui/SidebarPanel",
+                "caption": "Familiar",
                 "tags": "$:/tags/SideBar"
             }
         },
@@ -29,16 +36,17 @@
             "file": "ui/ToolbarButton.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
-                "title": "$:/plugins/mblackman/ai-gateway/ui/ToolbarButton",
+                "title": "$:/plugins/mblackman/familiar/ui/ToolbarButton",
                 "caption": "Summarize",
-                "tags": "$:/tags/ViewToolbar"
+                "tags": "$:/tags/ViewToolbar",
+                "list-before": "$:/core/ui/Buttons/close"
             }
         },
         {
             "file": "ui/NewChatButton.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
-                "title": "$:/plugins/mblackman/ai-gateway/ui/NewChatButton",
+                "title": "$:/plugins/mblackman/familiar/ui/NewChatButton",
                 "caption": "new AI chat",
                 "description": "Create an AI chat note with a generated title",
                 "tags": "$:/tags/PageControls",
@@ -49,16 +57,25 @@
             "file": "ui/ViewTemplate.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
-                "title": "$:/plugins/mblackman/ai-gateway/ui/ViewTemplate",
+                "title": "$:/plugins/mblackman/familiar/ui/ViewTemplate",
                 "tags": "$:/tags/ViewTemplate",
                 "list-before": "$:/core/ui/ViewTemplate/body"
+            }
+        },
+        {
+            "file": "ui/Settings.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/plugins/mblackman/familiar/ui/Settings",
+                "caption": "Familiar",
+                "tags": "$:/tags/ControlPanel/SettingsTab"
             }
         },
         {
             "file": "ui/styles.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
-                "title": "$:/plugins/mblackman/ai-gateway/ui/styles",
+                "title": "$:/plugins/mblackman/familiar/ui/styles",
                 "tags": "$:/tags/Stylesheet"
             }
         },
@@ -66,21 +83,21 @@
             "file": "config/GatewayURL.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
-                "title": "$:/config/mblackman/ai-gateway/GatewayURL"
+                "title": "$:/config/mblackman/familiar/GatewayURL"
             }
         },
         {
             "file": "config/APIKey.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
-                "title": "$:/config/mblackman/ai-gateway/APIKey"
+                "title": "$:/config/mblackman/familiar/APIKey"
             }
         },
         {
             "file": "config/ChatNoteTemplate.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
-                "title": "$:/config/mblackman/ai-gateway/ChatNoteTemplate"
+                "title": "$:/config/mblackman/familiar/ChatNoteTemplate"
             }
         }
     ]

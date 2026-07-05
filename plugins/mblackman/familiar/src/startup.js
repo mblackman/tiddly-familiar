@@ -1,7 +1,7 @@
 (function(){
 "use strict";
 
-exports.name = "tiddlypwa-gateway";
+exports.name = "tiddly-familiar";
 exports.platforms = ["browser"];
 exports.after = ["startup"];
 exports.before = ["render"];
@@ -10,19 +10,41 @@ exports.synchronous = true;
 exports.startup = function() {
   function dbg(msg) {
     $tw.wiki.addTiddler(new $tw.Tiddler({
-      title: "$:/temp/ai-gateway/debug",
+      title: "$:/temp/familiar/debug",
       text: msg
     }));
-    console.log("[ai-gateway]", msg);
+    console.log("[familiar]", msg);
+  }
+
+  // One-time carry-over from the pre-rename "ai-gateway" plugin: copy any
+  // saved config into the familiar/ namespace so an upgrade keeps the user's
+  // GatewayURL/APIKey without re-entry. Only fills empty targets, so it never
+  // clobbers new settings and is a no-op on fresh installs.
+  function migrateLegacyConfig() {
+    ["GatewayURL", "APIKey", "ChatNoteTemplate"].forEach(function(name) {
+      var oldTitle = "$:/config/mblackman/ai-gateway/" + name;
+      var newTitle = "$:/config/mblackman/familiar/" + name;
+      var oldVal = $tw.wiki.getTiddlerText(oldTitle);
+      if (oldVal && oldVal.trim() && !($tw.wiki.getTiddlerText(newTitle) || "").trim()) {
+        $tw.wiki.addTiddler(new $tw.Tiddler({title: newTitle, text: oldVal}));
+      }
+    });
   }
 
   try {
+    migrateLegacyConfig();
+
     var cfg = function(name) {
-      return ($tw.wiki.getTiddlerText("$:/config/mblackman/ai-gateway/" + name) || "").trim();
+      return ($tw.wiki.getTiddlerText("$:/config/mblackman/familiar/" + name) || "").trim();
     };
 
-    var baseURL = cfg("GatewayURL") || "http://localhost:8787";
-    var apiKey   = cfg("APIKey");
+    // Read per call so Control Panel settings changes apply without a reload.
+    var baseURL = function() {
+      return (cfg("GatewayURL") || "http://localhost:8787").replace(/\/+$/, "");
+    };
+    var apiKey = function() {
+      return cfg("APIKey");
+    };
 
     // This wiki sends its own note content with every request (the gateway's
     // client-supplied-content routes), so everything works against any
@@ -33,10 +55,10 @@ exports.startup = function() {
     var LOCAL_MAX_TEXT = 50000;
     var LOCAL_MAX_TOTAL = 2000000;
 
-    var CHAT_PREFIX = "$:/temp/ai-gateway/chat/";
-    var CHAT_NOTE_STATE = "$:/state/ai-gateway/chat-note";
-    var NEW_TITLE_STATE = "$:/state/ai-gateway/new-chat-title";
-    var NEW_NOTE_OPEN_STATE = "$:/state/ai-gateway/new-note-open";
+    var CHAT_PREFIX = "$:/temp/familiar/chat/";
+    var CHAT_NOTE_STATE = "$:/state/familiar/chat-note";
+    var NEW_TITLE_STATE = "$:/state/familiar/new-chat-title";
+    var NEW_NOTE_OPEN_STATE = "$:/state/familiar/new-note-open";
     var TITLE_TEMPLATE_DEFAULT = "AI Chat: {name}";
     var CHAT_TAG = "ai-chat";
     var CHAT_TURN_TAG = "ai-chat-turn";
@@ -45,7 +67,8 @@ exports.startup = function() {
 
     function headers() {
       var h = {"Content-Type": "application/json"};
-      if (apiKey) h["X-API-Key"] = apiKey;
+      var key = apiKey();
+      if (key) h["X-API-Key"] = key;
       return h;
     }
 
@@ -154,7 +177,7 @@ exports.startup = function() {
     }
 
     // --- new-chat-note titles from a user-editable template ---
-    // Template lives in $:/config/mblackman/ai-gateway/ChatNoteTemplate;
+    // Template lives in $:/config/mblackman/familiar/ChatNoteTemplate;
     // tokens: {name} random adjective-noun pair, {date} YYYY-MM-DD, {time} HH:MM.
 
     var NAME_ADJECTIVES = ["amber", "bold", "brisk", "calm", "clever", "cosmic",
@@ -298,7 +321,7 @@ exports.startup = function() {
     var SCAN_SLICE = 25;    // titles hashed per idle slice
     var SYNC_BATCH_NOTES = 100;
     var SYNC_BATCH_CHARS = 500000;
-    var SYNC_STATUS = "$:/temp/ai-gateway/sync-status";
+    var SYNC_STATUS = "$:/temp/familiar/sync-status";
 
     // Upload full content for `titles` in budgeted sequential batches. A note
     // is only marked synced if its hash is still the one that was pushed —
@@ -315,7 +338,7 @@ exports.startup = function() {
       }
       var rest = titles.slice(i);
       if (!batch.length) return pushTitles(rest);
-      return fetch(baseURL + "/notes/sync", {
+      return fetch(baseURL() + "/notes/sync", {
         method: "POST",
         headers: headers(),
         body: JSON.stringify({tiddlers: batch.map(function(n) {
@@ -397,7 +420,7 @@ exports.startup = function() {
     function warmServer() {
       var titles = Object.keys(syncState);
       var toCheck = titles.filter(function(t) { return !syncState[t].synced; });
-      fetch(baseURL + "/notes/check", {
+      fetch(baseURL() + "/notes/check", {
         method: "POST",
         headers: headers(),
         body: JSON.stringify({hashes: toCheck.map(function(t) { return syncState[t].hash; })})
@@ -481,7 +504,7 @@ exports.startup = function() {
         build();
         return Promise.resolve(payload);
       }
-      return fetch(baseURL + "/notes/check", {
+      return fetch(baseURL() + "/notes/check", {
         method: "POST",
         headers: headers(),
         body: JSON.stringify({hashes: unsynced.map(function(n) { return n.hash; })})
@@ -511,7 +534,7 @@ exports.startup = function() {
     // refs are resent as full content). Resolves to the raw Response.
     function localFetch(path, payload, makeBody) {
       function attempt(retried) {
-        return fetch(baseURL + path, {
+        return fetch(baseURL() + path, {
           method: "POST",
           headers: headers(),
           body: JSON.stringify(makeBody(payload.tiddlers))
@@ -581,7 +604,7 @@ exports.startup = function() {
       return pump();
     }
 
-    $tw.TiddlyPWAGateway = {
+    $tw.Familiar = {
       ask: function(question, filter, history) {
         var body = {question: question};
         if (history && history.length) body.history = history;
@@ -608,7 +631,7 @@ exports.startup = function() {
           }).then(function(r) {
             if (!r.ok) return rejectWithDetail(r);
             if (!r.body || !r.body.getReader) {
-              return $tw.TiddlyPWAGateway.ask(question, filter, history)
+              return $tw.Familiar.ask(question, filter, history)
                 .then(function(data) { handlers.onDone(data); });
             }
             return pumpSSE(r, {
@@ -636,7 +659,7 @@ exports.startup = function() {
         if (command === "tags") {
           body.vocabulary = $tw.wiki.filterTiddlers("[tags[]]");
         }
-        return fetch(baseURL + "/generate", {
+        return fetch(baseURL() + "/generate", {
           method: "POST",
           headers: headers(),
           body: JSON.stringify(body)
@@ -671,7 +694,7 @@ exports.startup = function() {
 
     function askErrorMessage(err) {
       if (!err.status) {
-        return "Cannot reach the gateway - is it running at " + baseURL + "?";
+        return "Cannot reach the gateway - is it running at " + baseURL() + "?";
       }
       if (err.status === 503) {
         return err.message;
@@ -687,7 +710,7 @@ exports.startup = function() {
     var scrollPending = false;
     function scrollChatLogs() {
       scrollPending = false;
-      var logs = document.querySelectorAll(".ai-gw-chat-log");
+      var logs = document.querySelectorAll(".fam-chat-log");
       for (var i = 0; i < logs.length; i++) {
         logs[i].scrollTop = logs[i].scrollHeight;
       }
@@ -697,8 +720,8 @@ exports.startup = function() {
       for (var title in changes) {
         if (title.indexOf(CHAT_PREFIX) === 0 ||
             title.indexOf("/turn/") !== -1 ||
-            title === "$:/state/ai-gateway/answer" ||
-            title === "$:/state/ai-gateway/asking") {
+            title === "$:/state/familiar/answer" ||
+            title === "$:/state/familiar/asking") {
           scrollPending = true;
           setTimeout(scrollChatLogs, 50);
           return;
@@ -716,7 +739,7 @@ exports.startup = function() {
         flushTimer = null;
         setState(opts.answerState, acc, "text/markdown");
       }
-      $tw.TiddlyPWAGateway.askStream(opts.question, opts.filter || null, opts.history, {
+      $tw.Familiar.askStream(opts.question, opts.filter || null, opts.history, {
         onDelta: function(text) {
           acc += text;
           if (!flushTimer) flushTimer = setTimeout(flush, FLUSH_MS);
@@ -739,33 +762,33 @@ exports.startup = function() {
     }
 
     $tw.rootWidget.addEventListener("tm-ask-ai", function() {
-      if (($tw.wiki.getTiddlerText("$:/state/ai-gateway/asking") || "") === "yes") return;
-      var question = ($tw.wiki.getTiddlerText("$:/state/ai-gateway/question") || "").trim();
-      var filter   = ($tw.wiki.getTiddlerText("$:/state/ai-gateway/filter")   || "").trim();
+      if (($tw.wiki.getTiddlerText("$:/state/familiar/asking") || "") === "yes") return;
+      var question = ($tw.wiki.getTiddlerText("$:/state/familiar/question") || "").trim();
+      var filter   = ($tw.wiki.getTiddlerText("$:/state/familiar/filter")   || "").trim();
       dbg("tm-ask-ai fired; question=" + JSON.stringify(question) + " filter=" + JSON.stringify(filter));
       if (!question) {
-        setState("$:/state/ai-gateway/answer", "//Type a question first.//");
+        setState("$:/state/familiar/answer", "//Type a question first.//");
         return;
       }
       var history = chatHistory();
       appendTurn("user", question);
-      setState("$:/state/ai-gateway/question", "");
-      setState("$:/state/ai-gateway/asking",  "yes");
-      setState("$:/state/ai-gateway/answer",  "", "text/markdown");
-      setState("$:/state/ai-gateway/sources", "");
+      setState("$:/state/familiar/question", "");
+      setState("$:/state/familiar/asking",  "yes");
+      setState("$:/state/familiar/answer",  "", "text/markdown");
+      setState("$:/state/familiar/sources", "");
       streamAsk({
         question: question,
         filter: filter,
         history: history,
         note: boundChatNote(),
-        answerState: "$:/state/ai-gateway/answer",
-        askingState: "$:/state/ai-gateway/asking",
+        answerState: "$:/state/familiar/answer",
+        askingState: "$:/state/familiar/asking",
         onDone: function(data) {
           var sources = (data.sources || []).map(function(s) { return "* [[" + s + "]]"; }).join("\n");
           if (data.local_note) {
             sources += (sources ? "\n" : "") + "//(" + data.local_note + " — narrow the filter to cover the rest)//";
           }
-          setState("$:/state/ai-gateway/sources", sources);
+          setState("$:/state/familiar/sources", sources);
         }
       });
     });
@@ -777,9 +800,9 @@ exports.startup = function() {
     $tw.rootWidget.addEventListener("tm-ask-ai-note", function(event) {
       var note = event.param || "";
       if (!note || !$tw.wiki.tiddlerExists(note)) return;
-      var qState      = "$:/state/ai-gateway/note-question/" + note;
-      var askingState = "$:/state/ai-gateway/note-asking/" + note;
-      var answerState = "$:/state/ai-gateway/note-answer/" + note;
+      var qState      = "$:/state/familiar/note-question/" + note;
+      var askingState = "$:/state/familiar/note-asking/" + note;
+      var answerState = "$:/state/familiar/note-answer/" + note;
       if (($tw.wiki.getTiddlerText(askingState) || "") === "yes") return;
       var question = ($tw.wiki.getTiddlerText(qState) || "").trim();
       dbg("tm-ask-ai-note fired; note=" + JSON.stringify(note) + " question=" + JSON.stringify(question));
@@ -853,8 +876,8 @@ exports.startup = function() {
       }, $tw.wiki.getModificationFields()));
       chatTurnTitles(CHAT_PREFIX).forEach(function(t) { $tw.wiki.deleteTiddler(t); });
       setState(CHAT_NOTE_STATE, title);
-      setState("$:/state/ai-gateway/answer", "");
-      setState("$:/state/ai-gateway/sources", "");
+      setState("$:/state/familiar/answer", "");
+      setState("$:/state/familiar/sources", "");
       setState(NEW_TITLE_STATE, "");
       setState(NEW_NOTE_OPEN_STATE, "no");
       if ($tw.wiki.addToStory) {
@@ -871,8 +894,8 @@ exports.startup = function() {
       if (!title || !$tw.wiki.tiddlerExists(title)) return;
       chatTurnTitles(CHAT_PREFIX).forEach(function(t) { $tw.wiki.deleteTiddler(t); });
       setState(CHAT_NOTE_STATE, title);
-      setState("$:/state/ai-gateway/answer", "");
-      setState("$:/state/ai-gateway/sources", "");
+      setState("$:/state/familiar/answer", "");
+      setState("$:/state/familiar/sources", "");
       dbg("resumed chat " + JSON.stringify(title));
     });
 
@@ -880,15 +903,15 @@ exports.startup = function() {
       var title = event.param || "";
       if (!title) return;
       dbg("tm-summarize-tiddler fired; title=" + JSON.stringify(title));
-      setState("$:/state/ai-gateway/summarizing", title);
-      $tw.TiddlyPWAGateway.generate(title, "summarize").then(function(data) {
+      setState("$:/state/familiar/summarizing", title);
+      $tw.Familiar.generate(title, "summarize").then(function(data) {
         var t = $tw.wiki.getTiddler(title);
         $tw.wiki.addTiddler(new $tw.Tiddler(t, {summary: data.result || ""}));
-        setState("$:/state/ai-gateway/summarizing", "");
+        setState("$:/state/familiar/summarizing", "");
         dbg("summarize ok; length=" + ((data.result||"").length));
       }).catch(function(err) {
-        setState("$:/state/ai-gateway/summarizing", "");
-        setState("$:/state/ai-gateway/summary-error", askErrorMessage(err));
+        setState("$:/state/familiar/summarizing", "");
+        setState("$:/state/familiar/summary-error", askErrorMessage(err));
         dbg("summarize FAILED: " + err.message);
       });
     });
@@ -896,21 +919,21 @@ exports.startup = function() {
     $tw.rootWidget.addEventListener("tm-suggest-tags", function(event) {
       var title = event.param || "";
       if (!title) return;
-      var stateTitle = "$:/temp/ai-gateway/tags/" + title;
+      var stateTitle = "$:/temp/familiar/tags/" + title;
       dbg("tm-suggest-tags fired; title=" + JSON.stringify(title));
-      setState("$:/state/ai-gateway/tags-loading", title);
-      $tw.TiddlyPWAGateway.generate(title, "tags").then(function(data) {
+      setState("$:/state/familiar/tags-loading", title);
+      $tw.Familiar.generate(title, "tags").then(function(data) {
         $tw.wiki.addTiddler(new $tw.Tiddler({
           title: stateTitle,
           text: $tw.utils.stringifyList(data.tags || [])
         }));
-        setState("$:/state/ai-gateway/tags-loading", "");
+        setState("$:/state/familiar/tags-loading", "");
         dbg("tags ok; count=" + ((data.tags || []).length));
       }).catch(function(err) {
         $tw.wiki.addTiddler(new $tw.Tiddler({
           title: stateTitle, text: "", error: askErrorMessage(err)
         }));
-        setState("$:/state/ai-gateway/tags-loading", "");
+        setState("$:/state/familiar/tags-loading", "");
         dbg("tags FAILED (" + (err.status || "network") + "): " + err.message);
       });
     });
@@ -918,16 +941,16 @@ exports.startup = function() {
     $tw.rootWidget.addEventListener("tm-extract-tasks", function(event) {
       var title = event.param || "";
       if (!title) return;
-      var stateTitle = "$:/temp/ai-gateway/tasks/" + title;
+      var stateTitle = "$:/temp/familiar/tasks/" + title;
       dbg("tm-extract-tasks fired; title=" + JSON.stringify(title));
-      setState("$:/state/ai-gateway/tasks-loading", title);
-      $tw.TiddlyPWAGateway.generate(title, "tasks").then(function(data) {
+      setState("$:/state/familiar/tasks-loading", title);
+      $tw.Familiar.generate(title, "tasks").then(function(data) {
         setState(stateTitle, data.result || "(no tasks found)", "text/markdown");
-        setState("$:/state/ai-gateway/tasks-loading", "");
+        setState("$:/state/familiar/tasks-loading", "");
         dbg("tasks ok; length=" + ((data.result||"").length));
       }).catch(function(err) {
         setState(stateTitle, "//" + askErrorMessage(err) + "//");
-        setState("$:/state/ai-gateway/tasks-loading", "");
+        setState("$:/state/familiar/tasks-loading", "");
         dbg("tasks FAILED (" + (err.status || "network") + "): " + err.message);
       });
     });
@@ -935,28 +958,28 @@ exports.startup = function() {
     $tw.rootWidget.addEventListener("tm-related-notes", function(event) {
       var title = event.param || "";
       if (!title) return;
-      var stateTitle = "$:/temp/ai-gateway/related/" + title;
+      var stateTitle = "$:/temp/familiar/related/" + title;
       dbg("tm-related-notes fired; title=" + JSON.stringify(title));
-      setState("$:/state/ai-gateway/related-loading", title);
-      $tw.TiddlyPWAGateway.related(title, 5).then(function(data) {
+      setState("$:/state/familiar/related-loading", title);
+      $tw.Familiar.related(title, 5).then(function(data) {
         var items = (data.related || []).map(function(r) { return "* [[" + r.title + "]]"; }).join("\n");
         if (!items) {
           items = "//No related notes found" + (data.truncated ? " yet — the index is still warming, try again//" : ".//");
         }
         setState(stateTitle, items);
-        setState("$:/state/ai-gateway/related-loading", "");
+        setState("$:/state/familiar/related-loading", "");
         dbg("related ok; count=" + ((data.related || []).length));
       }).catch(function(err) {
         setState(stateTitle, "//" + askErrorMessage(err) + "//");
-        setState("$:/state/ai-gateway/related-loading", "");
+        setState("$:/state/familiar/related-loading", "");
         dbg("related FAILED (" + (err.status || "network") + "): " + err.message);
       });
     });
 
     startInitialScan();
 
-    dbg("ready - gateway=" + baseURL + " (local mode)" +
-        " apiKey=" + (apiKey ? "set(" + apiKey.length + ")" : "MISSING"));
+    dbg("ready - gateway=" + baseURL() + " (local mode)" +
+        " apiKey=" + (apiKey() ? "set(" + apiKey().length + ")" : "MISSING"));
   } catch (e) {
     dbg("STARTUP ERROR: " + (e && e.stack ? e.stack : e));
   }
