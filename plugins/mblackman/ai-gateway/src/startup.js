@@ -268,67 +268,241 @@ exports.startup = function() {
       return sha256Hex(title + "\u0000" + text + "\u0000" + tags);
     }
 
-    // Resolve the filter against this wiki. Only `tags` goes in fields — it's
-    // the only field the gateway's keyword scoring reads. Text is truncated
-    // at the same limit the server enforces, and hashed post-truncation so
-    // both sides hash identical content.
-    function collectLocalTiddlers(filter) {
-      var titles = $tw.wiki.filterTiddlers((filter || "").trim() || "[!is[system]]");
-      var notes = titles.slice(0, LOCAL_MAX_TIDDLERS).map(function(title) {
-        var t = $tw.wiki.getTiddler(title);
-        var tags = (t && t.fields.tags) ? $tw.utils.stringifyList(t.fields.tags) : "";
-        var text = String((t && t.fields.text) || "").slice(0, LOCAL_MAX_TEXT);
-        return {
-          title: title,
-          text: text,
-          fields: tags ? {tags: tags} : {},
-          hash: noteHash(title, text, tags)
-        };
-      });
-      return {notes: notes, total: titles.length, capped: titles.length > LOCAL_MAX_TIDDLERS};
+    // Read one note in the canonical form both sides hash. Only `tags` goes
+    // in fields — it's the only field the gateway's keyword scoring reads.
+    // Text is truncated at the same limit the server enforces, and hashed
+    // post-truncation so both sides hash identical content.
+    function readNote(title) {
+      var t = $tw.wiki.getTiddler(title);
+      if (!t) return null;
+      var tags = t.fields.tags ? $tw.utils.stringifyList(t.fields.tags) : "";
+      var text = String(t.fields.text || "").slice(0, LOCAL_MAX_TEXT);
+      return {
+        title: title,
+        text: text,
+        fields: tags ? {tags: tags} : {},
+        hash: noteHash(title, text, tags)
+      };
     }
 
-    // Build the minimized payload: ask /notes/check which hashes the gateway
-    // is missing, send those in full and the rest as {hash} refs. If the
-    // preflight fails, degrade to sending everything — the cache is only an
-    // optimization. `resend(hashes)` upgrades refs to full content for the
-    // 409 retry (a note evicted between check and ask).
-    function localPayload(filter) {
-      var collected = collectLocalTiddlers(filter);
-      var mustSend = {};
-      var payload = {
-        tiddlers: [],
-        total: collected.total,
-        capped: collected.capped,
-        resend: function(hashes) {
-          (hashes || []).forEach(function(h) { mustSend[h] = true; });
-          var out = [], budget = 0;
-          collected.notes.forEach(function(n) {
-            if (!mustSend[n.hash]) {
-              out.push({hash: n.hash});
-            } else if (budget + n.text.length <= LOCAL_MAX_TOTAL) {
-              budget += n.text.length;
-              out.push({title: n.title, text: n.text, fields: n.fields});
-            } else {
-              payload.capped = true; // over budget: drop, self-heals once others cache
-            }
-          });
-          payload.tiddlers = out;
-          return out;
-        }
-      };
-      return fetch(baseURL + "/notes/check", {
+    // --- background sync ---
+    // syncState is the incremental title→{hash, synced} map: filled by an
+    // idle-time scan at startup and kept current by the wiki change event, so
+    // asks never rehash the corpus. `synced` means the server has confirmed
+    // it holds this exact content (via /notes/check or a /notes/sync push);
+    // synced notes travel as bare {hash} refs.
+    var syncState = {};
+    var pendingPush = {};   // titles changed since the last flush
+    var pushTimer = null;
+    var PUSH_DEBOUNCE_MS = 5000;
+    var SCAN_SLICE = 25;    // titles hashed per idle slice
+    var SYNC_BATCH_NOTES = 100;
+    var SYNC_BATCH_CHARS = 500000;
+    var SYNC_STATUS = "$:/temp/ai-gateway/sync-status";
+
+    // Upload full content for `titles` in budgeted sequential batches. A note
+    // is only marked synced if its hash is still the one that was pushed —
+    // an edit racing the upload stays pending for the next flush.
+    function pushTitles(titles) {
+      if (!titles.length) return Promise.resolve();
+      var batch = [], chars = 0, i = 0;
+      while (i < titles.length && batch.length < SYNC_BATCH_NOTES && chars < SYNC_BATCH_CHARS) {
+        var n = readNote(titles[i]);
+        i++;
+        if (!n) continue;
+        batch.push(n);
+        chars += n.text.length;
+      }
+      var rest = titles.slice(i);
+      if (!batch.length) return pushTitles(rest);
+      return fetch(baseURL + "/notes/sync", {
         method: "POST",
         headers: headers(),
-        body: JSON.stringify({hashes: collected.notes.map(function(n) { return n.hash; })})
+        body: JSON.stringify({tiddlers: batch.map(function(n) {
+          return {title: n.title, text: n.text, fields: n.fields};
+        })})
+      }).then(function(r) {
+        if (!r.ok) throw new Error("notes/sync " + r.status);
+        batch.forEach(function(n) {
+          var cur = syncState[n.title];
+          if (cur && cur.hash === n.hash) {
+            cur.synced = true;
+            delete pendingPush[n.title];
+          }
+        });
+        return pushTitles(rest);
+      });
+    }
+
+    function armPushFlush() {
+      if (pushTimer) clearTimeout(pushTimer);
+      pushTimer = setTimeout(function() {
+        pushTimer = null;
+        pushTitles(Object.keys(pendingPush)).catch(function(err) {
+          dbg("background push failed (" + err.message + ") - asks still work");
+        });
+      }, PUSH_DEBOUNCE_MS);
+    }
+
+    // Keep the map current: rehash changed notes (one note per event — cheap)
+    // and queue them for a debounced background push. Deletes just leave the
+    // map; the server's TTL prunes unreferenced content. System titles are
+    // skipped — $:/state and $:/temp churn constantly during streaming; the
+    // rare filter that selects system tiddlers is covered by on-demand
+    // hashing in localPayload.
+    $tw.wiki.addEventListener("change", function(changes) {
+      var dirty = false;
+      for (var title in changes) {
+        if (title.indexOf("$:/") === 0) continue;
+        if (changes[title].deleted) {
+          delete syncState[title];
+          delete pendingPush[title];
+          continue;
+        }
+        var n = readNote(title);
+        if (!n) continue;
+        syncState[title] = {hash: n.hash, synced: false};
+        pendingPush[title] = true;
+        dirty = true;
+      }
+      if (dirty) armPushFlush();
+    });
+
+    // Hash the whole wiki once, in idle-time slices so startup never janks,
+    // then warm the server: one /notes/check over everything, upload the
+    // missing notes. After this, steady-state asks are pure hash refs with
+    // no preflight and no hashing.
+    function startInitialScan() {
+      setState(SYNC_STATUS, "scanning");
+      var titles = $tw.wiki.filterTiddlers("[!is[system]]");
+      var i = 0;
+      function idle(fn) {
+        if (typeof requestIdleCallback === "function") requestIdleCallback(fn);
+        else setTimeout(fn, 50);
+      }
+      function slice() {
+        var end = Math.min(i + SCAN_SLICE, titles.length);
+        for (; i < end; i++) {
+          if (!syncState[titles[i]]) { // change handler may have beaten us
+            var n = readNote(titles[i]);
+            if (n) syncState[titles[i]] = {hash: n.hash, synced: false};
+          }
+        }
+        if (i < titles.length) return idle(slice);
+        warmServer();
+      }
+      idle(slice);
+    }
+
+    function warmServer() {
+      var titles = Object.keys(syncState);
+      var toCheck = titles.filter(function(t) { return !syncState[t].synced; });
+      fetch(baseURL + "/notes/check", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({hashes: toCheck.map(function(t) { return syncState[t].hash; })})
       }).then(function(r) {
         if (!r.ok) throw new Error("notes/check " + r.status);
         return r.json();
-      }).catch(function(err) {
-        dbg("notes/check unavailable (" + err.message + ") - sending full content");
-        return {missing: collected.notes.map(function(n) { return n.hash; })};
       }).then(function(d) {
-        payload.resend(d.missing || []);
+        var missing = {};
+        (d.missing || []).forEach(function(h) { missing[h] = true; });
+        var toPush = [];
+        toCheck.forEach(function(t) {
+          if (missing[syncState[t].hash]) toPush.push(t);
+          else syncState[t].synced = true;
+        });
+        return pushTitles(toPush).then(function() {
+          setState(SYNC_STATUS, "ready");
+          dbg("sync warm done - " + titles.length + " note(s) tracked, " +
+              toPush.length + " pushed");
+        });
+      }).catch(function(err) {
+        setState(SYNC_STATUS, "degraded");
+        dbg("sync warm failed (" + err.message + ") - asks degrade to full sends");
+      });
+    }
+
+    // Build the ask payload from the sync map: refs for server-confirmed
+    // notes, one small /notes/check over only the unconfirmed ones (empty in
+    // steady state → no preflight at all), full content for whatever the
+    // server lacks. `resend(hashes)` upgrades refs to full content for the
+    // 409 retry (a note evicted server-side after our last confirmation).
+    function localPayload(filter) {
+      var titles = $tw.wiki.filterTiddlers((filter || "").trim() || "[!is[system]]");
+      var total = titles.length;
+      var notes = [];
+      titles.slice(0, LOCAL_MAX_TIDDLERS).forEach(function(title) {
+        var e = syncState[title];
+        if (!e) { // not scanned yet (mid-startup) or a system tiddler
+          var n = readNote(title);
+          if (!n) return;
+          e = syncState[title] = {hash: n.hash, synced: false};
+        }
+        notes.push({title: title, hash: e.hash});
+      });
+      var mustSend = {};
+      var payload = {tiddlers: [], total: total, capped: total > LOCAL_MAX_TIDDLERS};
+
+      function build() {
+        var out = [], budget = 0;
+        notes.forEach(function(n) {
+          if (!mustSend[n.hash]) {
+            out.push({hash: n.hash});
+            return;
+          }
+          var full = readNote(n.title);
+          if (!full) return;
+          if (budget + full.text.length > LOCAL_MAX_TOTAL) {
+            payload.capped = true; // over budget: drop, self-heals once others cache
+            return;
+          }
+          budget += full.text.length;
+          out.push({title: full.title, text: full.text, fields: full.fields});
+        });
+        payload.tiddlers = out;
+        return out;
+      }
+
+      payload.resend = function(hashes) {
+        (hashes || []).forEach(function(h) { mustSend[h] = true; });
+        notes.forEach(function(n) { // server lost these: re-push in background
+          var e = syncState[n.title];
+          if (mustSend[n.hash] && e && e.hash === n.hash) e.synced = false;
+        });
+        return build();
+      };
+
+      var unsynced = notes.filter(function(n) {
+        var e = syncState[n.title];
+        return !(e && e.hash === n.hash && e.synced);
+      });
+      if (!unsynced.length) {
+        build();
+        return Promise.resolve(payload);
+      }
+      return fetch(baseURL + "/notes/check", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({hashes: unsynced.map(function(n) { return n.hash; })})
+      }).then(function(r) {
+        if (!r.ok) throw new Error("notes/check " + r.status);
+        return r.json();
+      }).then(function(d) {
+        var missing = {};
+        (d.missing || []).forEach(function(h) { missing[h] = true; });
+        unsynced.forEach(function(n) {
+          var e = syncState[n.title];
+          if (missing[n.hash]) mustSend[n.hash] = true;
+          else if (e && e.hash === n.hash) e.synced = true;
+        });
+        build();
+        return payload;
+      }).catch(function(err) {
+        dbg("notes/check unavailable (" + err.message + ") - sending " +
+            unsynced.length + " note(s) in full");
+        unsynced.forEach(function(n) { mustSend[n.hash] = true; });
+        build();
         return payload;
       });
     }
@@ -778,6 +952,8 @@ exports.startup = function() {
         dbg("related FAILED (" + (err.status || "network") + "): " + err.message);
       });
     });
+
+    startInitialScan();
 
     dbg("ready - gateway=" + baseURL + " (local mode)" +
         " apiKey=" + (apiKey ? "set(" + apiKey.length + ")" : "MISSING"));

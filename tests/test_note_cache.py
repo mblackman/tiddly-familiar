@@ -86,6 +86,38 @@ def test_prune_drops_stale_keeps_fresh(tmp_path):
     cache.close()
 
 
+def test_check_and_get_many_span_query_chunks(tmp_path):
+    """Lookups over more hashes than one IN clause holds still resolve every
+    entry (queries are chunked under SQLite's bound-variable limit)."""
+    cache = NoteCache(str(tmp_path / "notes.sqlite3"))
+    tiddlers = [
+        {"title": f"Note {i}", "text": f"body {i}", "fields": {}}
+        for i in range(1200)
+    ]
+    cache.put_many(tiddlers)
+    hashes = [canonical_hash(t["title"], t["text"], "") for t in tiddlers]
+    unknown = ["0" * 64, "f" * 64]
+    assert cache.check(hashes + unknown) == set(hashes)
+    resolved = cache.get_many(hashes + unknown)
+    assert len(resolved) == len(tiddlers)
+    assert resolved[hashes[1199]]["title"] == "Note 1199"
+    cache.close()
+
+
+def test_check_bumps_last_seen_across_chunks(tmp_path):
+    """The last_seen bump covers every found hash, not just the first chunk."""
+    cache = NoteCache(str(tmp_path / "notes.sqlite3"))
+    tiddlers = [
+        {"title": f"N{i}", "text": "x", "fields": {}} for i in range(600)
+    ]
+    cache.put_many(tiddlers)
+    cache._db.execute("UPDATE notes SET last_seen = ?", (time.time() - 40 * 86400,))
+    cache._db.commit()
+    cache.check([canonical_hash(t["title"], "x", "") for t in tiddlers])
+    assert cache.prune(ttl_days=30) == 0
+    cache.close()
+
+
 def test_check_bumps_last_seen(tmp_path):
     """A note referenced only by hash must not age out while still in use."""
     cache = NoteCache(str(tmp_path / "notes.sqlite3"))

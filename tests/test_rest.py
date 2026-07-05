@@ -14,6 +14,16 @@ API_KEY = "test-key"
 AUTH = {"X-API-Key": API_KEY}
 
 
+class RecordingPrewarmer:
+    """Stands in for main._prewarmer: records what routes enqueue."""
+
+    def __init__(self):
+        self.enqueued: list[dict] = []
+
+    def enqueue(self, tiddlers):
+        self.enqueued.extend(tiddlers)
+
+
 @pytest.fixture
 def client(monkeypatch):
     cfg = AppConfig(
@@ -24,6 +34,7 @@ def client(monkeypatch):
     monkeypatch.setattr(main, "_config", cfg)
     monkeypatch.setattr(main, "_embedder", object())
     monkeypatch.setattr(main, "_note_cache", NoteCache(":memory:"))
+    monkeypatch.setattr(main, "_prewarmer", RecordingPrewarmer())
     # TestClient outside a `with` block does not run the lifespan.
     return TestClient(main.app, raise_server_exceptions=False)
 
@@ -88,6 +99,57 @@ def test_client_ask_cache_flow(client, monkeypatch):
     data = second.json()
     assert data["sources"] == ["Zebra"]
     assert data["cache"] == {"hits": 1, "misses": 0}
+
+
+def test_notes_sync_stores_for_later_hash_refs(client, monkeypatch):
+    """Background sync warms the note cache: a later ask can be pure refs."""
+
+    async def fake_answer_question(**kw):
+        return {
+            "answer": "ok",
+            "sources": [t["title"] for t in kw["tiddlers"]],
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    resp = client.post("/notes/sync", json={"tiddlers": [ZEBRA]}, headers=AUTH)
+    assert resp.status_code == 200
+    assert resp.json() == {"stored": 1}
+
+    ask = client.post(
+        "/ask",
+        json={"question": "q", "tiddlers": [{"hash": ZEBRA_HASH}]},
+        headers=AUTH,
+    )
+    assert ask.status_code == 200
+    assert ask.json()["cache"] == {"hits": 1, "misses": 0}
+
+
+def test_notes_sync_rejects_hash_refs(client):
+    resp = client.post(
+        "/notes/sync", json={"tiddlers": [{"hash": "f" * 64}]}, headers=AUTH
+    )
+    assert resp.status_code == 422
+
+
+def test_ingest_schedules_embedding_prewarm(client, monkeypatch):
+    """Both ingest points — sync and full sends on ask — enqueue for the
+    background embed worker; refs (already-cached content) do not."""
+
+    async def fake_answer_question(**kw):
+        return {"answer": "ok", "sources": [], "truncated": False}
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    client.post("/notes/sync", json={"tiddlers": [ZEBRA]}, headers=AUTH)
+    assert [t["title"] for t in main._prewarmer.enqueued] == ["Zebra"]
+
+    other = {"title": "Okapi", "text": "A forest giraffe.", "fields": {}}
+    client.post(
+        "/ask",
+        json={"question": "q", "tiddlers": [{"hash": ZEBRA_HASH}, other]},
+        headers=AUTH,
+    )
+    assert [t["title"] for t in main._prewarmer.enqueued] == ["Zebra", "Okapi"]
 
 
 def test_client_ask_unknown_ref_is_409_with_missing(client):
@@ -251,6 +313,7 @@ def test_client_routes_require_auth(client):
     assert client.post("/ask/stream", json={"question": "q"}).status_code == 403
     assert client.post("/related", json={"target": ZEBRA}).status_code == 403
     assert client.post("/notes/check", json={"hashes": []}).status_code == 403
+    assert client.post("/notes/sync", json={"tiddlers": []}).status_code == 403
 
 
 def test_client_ask_backend_failure_is_503(client, monkeypatch):

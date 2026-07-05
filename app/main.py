@@ -15,17 +15,22 @@ from . import service
 from .config import AppConfig, load_config
 from .embeddings import Embedder
 from .note_cache import NoteCache
+from .prewarm import EmbedPrewarmer
 
 logger = logging.getLogger(__name__)
 
 _config: AppConfig | None = None
 _embedder: Embedder | None = None
 _note_cache: NoteCache | None = None
+_prewarmer: EmbedPrewarmer | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _config, _embedder, _note_cache
+    global _config, _embedder, _note_cache, _prewarmer
+    # Uvicorn only configures its own loggers; give the app's INFO logs
+    # (embedder cache stats, prewarm progress) a handler too.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: [%(name)s] %(message)s")
     _config = load_config()
     # Cache lives on the profiles named volume so restarts don't re-embed.
     _embedder = Embedder(
@@ -36,7 +41,11 @@ async def lifespan(app: FastAPI):
     # Note cache for the plugin's hash refs — same volume, same warm-restart story.
     _note_cache = NoteCache(os.path.join(_config.profiles_dir, "note_cache.sqlite3"))
     _note_cache.prune()
+    # Embeds ingested notes off the request path so asks hit a warm vector cache.
+    _prewarmer = EmbedPrewarmer(_embedder)
+    _prewarmer.start()
     yield
+    await _prewarmer.aclose()
     _note_cache.close()
     await _embedder.aclose()
 
@@ -185,6 +194,22 @@ class NotesCheckBody(BaseModel):
     hashes: list[str] = Field(default_factory=list, max_length=2000)
 
 
+class NotesSyncBody(BaseModel):
+    """Background upload from the plugin: full tiddlers only (a hash ref has
+    nothing to store). Same budgets as the ask routes."""
+
+    tiddlers: list[ClientTiddler] = Field(
+        default_factory=list, max_length=MAX_CLIENT_TIDDLERS
+    )
+
+    @model_validator(mode="after")
+    def _fulls_within_budget(self):
+        if any(t.title is None for t in self.tiddlers):
+            raise ValueError("sync accepts full tiddlers only, not hash refs")
+        _check_total_budget(self.tiddlers)
+        return self
+
+
 def _resolve_client_tiddlers(items: list[ClientTiddler]) -> tuple[list[dict], dict]:
     """Turn a mixed full/ref list into plain tiddler dicts (original order).
 
@@ -205,6 +230,10 @@ def _resolve_client_tiddlers(items: list[ClientTiddler]) -> tuple[list[dict], di
     ]
     if fulls:
         _note_cache.put_many(fulls)
+        # Warm their embeddings in the background so the *next* ask over this
+        # content skips inline embedding even if this one can't.
+        if _prewarmer is not None:
+            _prewarmer.enqueue(fulls)
     out = [
         {"title": t.title, "text": t.text, "fields": t.fields}
         if t.title is not None
@@ -228,6 +257,20 @@ async def notes_check(body: NotesCheckBody):
     sent in full? Known hashes get their retention window bumped."""
     present = _note_cache.check(body.hashes)
     return {"missing": [h for h in body.hashes if h not in present]}
+
+
+@app.post("/notes/sync", dependencies=[Depends(require_auth)])
+async def notes_sync(body: NotesSyncBody):
+    """Background sync from the plugin: store full tiddlers now, embed them
+    off the request path, so later asks are pure hash refs over a warm cache."""
+    tiddlers = [
+        {"title": t.title, "text": t.text, "fields": t.fields} for t in body.tiddlers
+    ]
+    if tiddlers:
+        _note_cache.put_many(tiddlers)
+        if _prewarmer is not None:
+            _prewarmer.enqueue(tiddlers)
+    return {"stored": len(tiddlers)}
 
 
 @app.post("/ask", dependencies=[Depends(require_auth)])

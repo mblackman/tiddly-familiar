@@ -1,12 +1,13 @@
 """Headless end-to-end check of the (local-only) plugin against the dev wiki.
 
 Run via scripts/run_headless.sh, like verify_plugin_headless.py.
-The plugin sends note content with every request; a network tripwire records
-any request touching /notebooks/ and fails the run (those routes no longer
-exist server-side — the plugin must never call them). Exercises the streaming
-ask over locally-collected notes, the content-addressed cache (second ask
-must be all hash refs → cache.hits > 0), history follow-up, local
-related-notes, and browser-rendered Summarize. Restores config and cleans up.
+The plugin background-syncs note content (idle-time scan + change-event
+pushes); a network tripwire records any request touching /notebooks/ and
+fails the run (those routes no longer exist server-side — the plugin must
+never call them). Verifies the background warm (the FIRST ask is already all
+hash refs with no /notes/check preflight), the streaming ask, history
+follow-up, the debounced change push, local related-notes, and
+browser-rendered Summarize. Restores config and cleans up.
 """
 
 import asyncio
@@ -60,6 +61,21 @@ async def wait_done(page, state="$:/state/ai-gateway/asking"):
     raise TimeoutError("ask did not finish")
 
 
+async def ask_stream_probe(page, question):
+    """askStream via the JS API, returning {deltas, cache, answered}."""
+    return await page.evaluate(
+        "(q) => new Promise((resolve, reject) => {"
+        "  var deltas = 0;"
+        "  $tw.TiddlyPWAGateway.askStream(q, null, null, {"
+        "    onDelta: function() { deltas += 1; },"
+        "    onDone: function(data) { resolve({deltas: deltas, cache: data.cache || null,"
+        "      answered: !!(data.answer || '').length}); }"
+        "  }).catch(reject);"
+        "})",
+        question,
+    )
+
+
 async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch()
@@ -73,6 +89,13 @@ async def main():
         page.on(
             "request",
             lambda r: "/notebooks/" in r.url and notebook_requests.append(r.url),
+        )
+        # Counts /notes/check preflights: allowed during the background warm,
+        # forbidden on steady-state asks (payloads must be pure hash refs).
+        check_requests = []
+        page.on(
+            "request",
+            lambda r: "/notes/check" in r.url and check_requests.append(r.url),
         )
 
         await page.goto(WIKI, wait_until="load")
@@ -90,7 +113,39 @@ async def main():
         await asyncio.sleep(2)
         debug = await get_text(page, "$:/temp/ai-gateway/debug")
         print("debug:", debug)
-        assert "(local mode)" in debug, f"unexpected startup banner: {debug}"
+        # The warm-done message may have already overwritten the ready banner
+        # (dbg is a single tiddler); either one proves the local-mode startup.
+        assert "(local mode)" in debug or "sync warm" in debug, \
+            f"unexpected startup banner: {debug}"
+
+        # --- background warm: idle scan + /notes/check + /notes/sync ---
+        status = ""
+        for _ in range(180):
+            status = await get_text(page, "$:/temp/ai-gateway/sync-status")
+            if status in ("ready", "degraded"):
+                break
+            await asyncio.sleep(0.5)
+        print("sync-status:", status)
+        assert status == "ready", f"background warm did not finish: {status!r}"
+        warm_checks = len(check_requests)
+        assert warm_checks >= 1, "warm never called /notes/check"
+
+        # --- the FIRST ask is already all hash refs over a warm server:
+        # hits > 0 with misses == 0 proves the background sync (and the JS
+        # sha256 parity), and no new /notes/check proves there's no preflight
+        # left on the ask path ---
+        probe = await ask_stream_probe(
+            page, "What animal has striped legs and where does it live?"
+        )
+        print("first-ask probe:", probe)
+        assert probe["answered"], "streamed ask produced no answer"
+        assert probe["deltas"] >= 1, "no delta events arrived over the stream"
+        assert probe["cache"] and probe["cache"]["hits"] > 0, \
+            f"no cache hits on first ask — background sync broken? {probe['cache']}"
+        assert probe["cache"]["misses"] == 0, \
+            f"unexpected full sends after warm: {probe['cache']}"
+        assert len(check_requests) == warm_checks, \
+            f"steady-state ask still preflights /notes/check: {check_requests}"
 
         # --- streaming ask over locally-collected notes ---
         await set_tiddler(page, "$:/state/ai-gateway/question",
@@ -109,27 +164,22 @@ async def main():
         assert "Zebra Facts" in turns[1]["sources"], \
             f"seeded note not cited: {turns[1]['sources']!r}"
 
-        # --- streaming + cache round-trip in one probe: the second ask must
-        # deliver deltas AND be all hash refs (cache.hits > 0, misses == 0
-        # proves the JS sha256 matches the server's canonical_hash) ---
-        probe = await page.evaluate(
-            "() => new Promise((resolve, reject) => {"
-            "  var deltas = 0;"
-            "  $tw.TiddlyPWAGateway.askStream("
-            "    'What animal has striped legs and where does it live?', null, null, {"
-            "    onDelta: function() { deltas += 1; },"
-            "    onDone: function(data) { resolve({deltas: deltas, cache: data.cache || null,"
-            "      answered: !!(data.answer || '').length}); }"
-            "  }).catch(reject);"
-            "})"
+        # --- change-event sync: edit a note, wait out the 5s debounce, and
+        # the next ask must still be all refs with no preflight (the edit was
+        # pushed in the background via /notes/sync) ---
+        checks_before_edit = len(check_requests)
+        await set_tiddler(page, "Zebra Facts", SEEDS["Zebra Facts"] +
+                          " Zebras sleep standing up.")
+        await asyncio.sleep(10)  # debounce (5s) + push
+        probe = await ask_stream_probe(
+            page, "How do zebras sleep and what makes their stripes special?"
         )
-        print("askStream probe:", probe)
-        assert probe["answered"], "streamed ask produced no answer"
-        assert probe["deltas"] >= 1, "no delta events arrived over the stream"
-        assert probe["cache"] and probe["cache"]["hits"] > 0, \
-            f"no cache hits on second ask — JS/Python hash mismatch? {probe['cache']}"
-        assert probe["cache"]["misses"] == 0, \
-            f"unexpected re-sends on unchanged wiki: {probe['cache']}"
+        print("post-edit probe:", probe)
+        assert probe["cache"] and probe["cache"]["misses"] == 0, \
+            f"edited note was not background-pushed: {probe['cache']}"
+        assert probe["cache"]["hits"] > 0, f"no refs after edit: {probe['cache']}"
+        assert len(check_requests) == checks_before_edit, \
+            f"ask after edit still preflights /notes/check: {check_requests}"
 
         # --- follow-up uses history ---
         await set_tiddler(page, "$:/state/ai-gateway/question",

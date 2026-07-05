@@ -23,6 +23,14 @@ logger = logging.getLogger(__name__)
 # entries never go stale, so this only bounds disk growth from deleted notes.
 TTL_DAYS = 30
 
+# IN-clause chunk size; SQLite caps bound variables at 999 by default.
+_QUERY_CHUNK = 500
+
+
+def _chunks(items: list, size: int = _QUERY_CHUNK):
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
 
 def canonical_hash(title: str, text: str, tags: str = "") -> str:
     """The note hash both sides compute: sha256 over the UTF-8 bytes of
@@ -66,14 +74,18 @@ class NoteCache:
         """Return the subset of `hashes` present, bumping their last_seen."""
         present: set[str] = set()
         now = time.time()
-        for h in hashes:
-            row = self._db.execute(
-                "SELECT 1 FROM notes WHERE hash = ?", (h,)
-            ).fetchone()
-            if row:
-                present.add(h)
+        for chunk in _chunks(hashes):
+            marks = ",".join("?" * len(chunk))
+            rows = self._db.execute(
+                f"SELECT hash FROM notes WHERE hash IN ({marks})", chunk
+            ).fetchall()
+            found = [r[0] for r in rows]
+            present.update(found)
+            if found:
                 self._db.execute(
-                    "UPDATE notes SET last_seen = ? WHERE hash = ?", (now, h)
+                    f"UPDATE notes SET last_seen = ? WHERE hash IN"
+                    f" ({','.join('?' * len(found))})",
+                    [now, *found],
                 )
         self._db.commit()
         return present
@@ -81,16 +93,15 @@ class NoteCache:
     def get_many(self, hashes: list[str]) -> dict[str, dict]:
         """Resolve hashes to {title, text, fields} dicts; absent keys omitted."""
         out: dict[str, dict] = {}
-        for h in hashes:
-            row = self._db.execute(
-                "SELECT title, text, fields FROM notes WHERE hash = ?", (h,)
-            ).fetchone()
-            if row:
-                out[h] = {
-                    "title": row[0],
-                    "text": row[1],
-                    "fields": json.loads(row[2]),
-                }
+        for chunk in _chunks(hashes):
+            marks = ",".join("?" * len(chunk))
+            rows = self._db.execute(
+                f"SELECT hash, title, text, fields FROM notes"
+                f" WHERE hash IN ({marks})",
+                chunk,
+            ).fetchall()
+            for h, title, text, fields in rows:
+                out[h] = {"title": title, "text": text, "fields": json.loads(fields)}
         return out
 
     def put_many(self, tiddlers: list[dict]) -> None:
