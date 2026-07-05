@@ -1,14 +1,15 @@
-"""Milestone 5 ("chat era"): streaming answers, chat history threading,
-one-shot generation commands, and synthesis digests."""
+"""Milestone 5 ("chat era") ai-layer tests: streaming answers, chat history
+threading, and one-shot generation commands. (Service-level wiring for these
+lives in test_service.py.)"""
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import httpx
 import pytest
 
-from app import ai, service
+from app import ai
 from app.ai import (
     GenerationError,
     _gemini_contents,
@@ -28,7 +29,6 @@ class FakeConfig:
     llm_backend: str = "gemini"
     ollama_url: str = "http://stub:11434"
     ollama_llm_model: str = "test-llm"
-    digest_filter: str = "[days:modified[-7]]"
 
 
 class FakeEmbedder:
@@ -237,89 +237,6 @@ def test_stream_ollama_inline_error_line(monkeypatch):
     assert "boom" in str(exc.value)
 
 
-# --- service.ask_stream ---
-
-
-@dataclass
-class FakeNotebook:
-    tiddlers: list = field(default_factory=list)
-    store: dict = field(default_factory=dict)
-    rendered: dict = field(default_factory=dict)
-    seen_filters: list = field(default_factory=list)
-    written: list = field(default_factory=list)
-
-    async def filter_tiddlers(self, filter, full=False):
-        self.seen_filters.append(filter)
-        if filter == "[tags[]]":
-            return ["existing-tag", "another tag"]
-        return self.tiddlers
-
-    async def get_tiddler(self, title):
-        return self.store.get(title)
-
-    async def put_tiddler(self, title, fields, text):
-        self.written.append((title, fields, text))
-        return True
-
-    async def render(self, title, mode="plain"):
-        return self.rendered.get(title, "")
-
-
-def test_ask_stream_guard_raises_before_streaming():
-    with pytest.raises(service.AskError) as exc:
-        asyncio.run(
-            service.ask_stream(
-                FakeNotebook(),
-                "q?",
-                config=FakeConfig(gemini_api_key=""),
-                embedder=object(),
-            )
-        )
-    assert "GEMINI_API_KEY" in str(exc.value)
-
-
-def test_ask_stream_translates_midstream_failure(monkeypatch):
-    async def exploding_stream(**kw):
-        yield ("delta", {"text": "par"})
-        raise GenerationError("The local LLM timed out")
-
-    monkeypatch.setattr(
-        service, "answer_question_stream", lambda **kw: exploding_stream(**kw)
-    )
-    events = _collect(
-        asyncio.run(
-            service.ask_stream(
-                FakeNotebook(), "q?", config=FakeConfig(), embedder=object()
-            )
-        )
-    )
-    assert events[0] == ("delta", {"text": "par"})
-    name, data = events[-1]
-    assert name == "error"
-    assert data["status"] == 503
-    assert "local LLM" in data["message"]
-
-
-def test_ask_passes_history_through(monkeypatch):
-    captured = {}
-
-    async def fake_answer_question(**kw):
-        captured.update(kw)
-        return {"answer": "ok", "sources": [], "truncated": False}
-
-    monkeypatch.setattr(service, "answer_question", fake_answer_question)
-    asyncio.run(
-        service.ask(
-            FakeNotebook(),
-            "q?",
-            config=FakeConfig(),
-            embedder=object(),
-            history=[{"role": "user", "content": "before"}],
-        )
-    )
-    assert captured["history"] == [{"role": "user", "content": "before"}]
-
-
 # --- generation commands ---
 
 
@@ -350,119 +267,3 @@ def test_run_command_tags_includes_vocabulary(monkeypatch):
         run_command("tags", "T", "text", FakeConfig(), vocabulary=["alpha", "beta"])
     )
     assert "alpha, beta" in seen["prompt"]
-
-
-def test_generate_unknown_command_is_400():
-    with pytest.raises(service.AskError) as exc:
-        asyncio.run(
-            service.generate(
-                FakeNotebook(), "T", "translate", config=FakeConfig()
-            )
-        )
-    assert exc.value.status == 400
-    assert "summarize" in str(exc.value)
-
-
-def test_generate_missing_tiddler_is_404():
-    with pytest.raises(service.AskError) as exc:
-        asyncio.run(
-            service.generate(FakeNotebook(), "Nope", "summarize", config=FakeConfig())
-        )
-    assert exc.value.status == 404
-
-
-def test_generate_empty_text_is_422():
-    nbm = FakeNotebook(store={"T": {"title": "T", "text": "   "}})
-    with pytest.raises(service.AskError) as exc:
-        asyncio.run(service.generate(nbm, "T", "summarize", config=FakeConfig()))
-    assert exc.value.status == 422
-
-
-def test_generate_prefers_rendered_text(monkeypatch):
-    nbm = FakeNotebook(
-        store={"T": {"title": "T", "text": "{{transclusion}}"}},
-        rendered={"T": "resolved text"},
-    )
-    seen = {}
-
-    async def fake_run_command(command, title, text, cfg, vocabulary=None):
-        seen["text"] = text
-        return "sum"
-
-    monkeypatch.setattr(service, "run_command", fake_run_command)
-    result = asyncio.run(service.generate(nbm, "T", "summarize", config=FakeConfig()))
-    assert seen["text"] == "resolved text"
-    assert result == {"command": "summarize", "title": "T", "result": "sum"}
-
-
-def test_generate_tags_returns_parsed_list(monkeypatch):
-    nbm = FakeNotebook(store={"T": {"title": "T", "text": "body"}}, rendered={"T": "body"})
-
-    async def fake_run_command(command, title, text, cfg, vocabulary=None):
-        assert vocabulary == ["existing-tag", "another tag"]
-        return "- homelab\n* another tag\n\n\"quoted\"\nfive\nsix\nseven"
-
-    monkeypatch.setattr(service, "run_command", fake_run_command)
-    result = asyncio.run(service.generate(nbm, "T", "tags", config=FakeConfig()))
-    assert result["tags"] == ["homelab", "another tag", "quoted", "five", "six"]
-
-
-def test_generate_translates_backend_failure(monkeypatch):
-    nbm = FakeNotebook(store={"T": {"title": "T", "text": "body"}}, rendered={"T": "body"})
-
-    async def fake_run_command(*a, **kw):
-        raise GenerationError("The local LLM timed out")
-
-    monkeypatch.setattr(service, "run_command", fake_run_command)
-    with pytest.raises(service.AskError) as exc:
-        asyncio.run(service.generate(nbm, "T", "summarize", config=FakeConfig()))
-    assert exc.value.status == 503
-
-
-# --- digest ---
-
-
-def test_digest_skips_when_nothing_changed():
-    nbm = FakeNotebook(tiddlers=[])
-    result = asyncio.run(service.digest(nbm, config=FakeConfig()))
-    assert result == {"written": False, "reason": "no recently modified notes"}
-    assert nbm.seen_filters == [FakeConfig.digest_filter]
-    assert nbm.written == []
-
-
-def test_digest_writes_tagged_tiddler(monkeypatch):
-    nbm = FakeNotebook(tiddlers=[{"title": "Changed", "text": "new stuff"}])
-
-    async def fake_digest_text(tiddlers, cfg, period="the last 7 days"):
-        assert [t["title"] for t in tiddlers] == ["Changed"]
-        return "!! Digest\n* [[Changed]]", ["Changed"]
-
-    monkeypatch.setattr(service, "ai_digest_text", fake_digest_text)
-    result = asyncio.run(service.digest(nbm, config=FakeConfig()))
-    assert result["written"] is True
-    assert result["title"].startswith("AI Digest ")
-    assert result["sources"] == ["Changed"]
-    [(title, fields, text)] = nbm.written
-    assert fields == {"tags": service.DIGEST_TAG}
-    assert "[[Changed]]" in text
-
-
-def test_digest_dry_run_does_not_write(monkeypatch):
-    nbm = FakeNotebook(tiddlers=[{"title": "Changed", "text": "new stuff"}])
-
-    async def fake_digest_text(tiddlers, cfg, period="the last 7 days"):
-        return "digest", ["Changed"]
-
-    monkeypatch.setattr(service, "ai_digest_text", fake_digest_text)
-    result = asyncio.run(
-        service.digest(nbm, config=FakeConfig(), write=False, title="Custom")
-    )
-    assert result["written"] is False
-    assert result["title"] == "Custom"
-    assert nbm.written == []
-
-
-def test_digest_custom_filter_passes_through(monkeypatch):
-    nbm = FakeNotebook(tiddlers=[])
-    asyncio.run(service.digest(nbm, config=FakeConfig(), filter="[tag[x]]"))
-    assert nbm.seen_filters == ["[tag[x]]"]

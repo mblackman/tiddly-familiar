@@ -1,10 +1,10 @@
 """Headless end-to-end check of the browser plugin against the dev wiki.
 
-Runs INSIDE the gateway container (docker cp + docker exec), where Chromium
-and the compose network live. Temporarily points the plugin's GatewayURL
-config at http://gateway:8787 (gw.lab.cc doesn't resolve in-container),
-exercises streaming chat + follow-up history + tag/task commands, then
-restores the config.
+Run via scripts/run_headless.sh — a throwaway Playwright container on the
+compose network (the gateway image has no browser). Temporarily points the
+plugin's GatewayURL config at http://gateway:8787 (gw.lab.cc doesn't resolve
+in-container), exercises streaming chat + follow-up history + tag/task
+commands, then restores the config.
 """
 
 import asyncio

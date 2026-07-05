@@ -1,6 +1,6 @@
-"""Screenshot an ai-chat note rendered in the story river (runs in the
-gateway container like shot_panel.py). Seeds a saved chat note with turns,
-opens it, grabs the tiddler frame, then cleans up."""
+"""Screenshot an ai-chat note rendered in the story river (run via
+scripts/run_headless.sh, like shot_panel.py). Seeds a saved chat note with
+turns, opens it, grabs the tiddler frame, then cleans up."""
 
 import asyncio
 

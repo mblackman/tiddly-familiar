@@ -5,10 +5,10 @@ services:
     ports:
       - "8787:8787"
     # All secrets/config come straight from .env via env_file (GATEWAY_API_KEY,
-    # GEMINI_API_KEY, GEMINI_MODEL, and per-notebook TWPWA_<NAME>_PASSWORD /
-    # _TOKEN / _SALT). CONFIG_PATH is baked into the image. We deliberately do
-    # NOT restate these under `environment:` with ${...} interpolation — that
-    # overrides env_file and blanks any var not also present in the compose shell.
+    # GEMINI_API_KEY, GEMINI_MODEL, ...) — config is env-only, see
+    # app/config.py. We deliberately do NOT restate these under `environment:`
+    # with ${...} interpolation — that overrides env_file and blanks any var
+    # not also present in the compose shell.
     env_file:
       - path: .env
         required: false

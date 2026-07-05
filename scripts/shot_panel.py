@@ -1,6 +1,6 @@
-"""Screenshot the Ask AI sidebar panel in the dev wiki (runs in the gateway
-container like verify_plugin_headless.py). Seeds a fake transcript so the
-bubble layout is visible, grabs the panel, then cleans up."""
+"""Screenshot the Ask AI sidebar panel in the dev wiki (run via
+scripts/run_headless.sh, like verify_plugin_headless.py). Seeds a fake
+transcript so the bubble layout is visible, grabs the panel, then cleans up."""
 
 import asyncio
 

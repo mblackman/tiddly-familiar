@@ -1,9 +1,9 @@
 """Headless end-to-end check of the (local-only) plugin against the dev wiki.
 
-Runs INSIDE the gateway container (docker cp + docker exec), like
-verify_plugin_headless.py. The plugin sends note content with every request;
-a network tripwire records any request touching /notebooks/ and fails the
-run (the plugin must never use the notebook routes). Exercises the streaming
+Run via scripts/run_headless.sh, like verify_plugin_headless.py.
+The plugin sends note content with every request; a network tripwire records
+any request touching /notebooks/ and fails the run (those routes no longer
+exist server-side — the plugin must never call them). Exercises the streaming
 ask over locally-collected notes, the content-addressed cache (second ask
 must be all hash refs → cache.hits > 0), history follow-up, local
 related-notes, and browser-rendered Summarize. Restores config and cleans up.

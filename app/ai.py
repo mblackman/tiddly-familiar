@@ -622,28 +622,3 @@ async def run_command(
         vocabulary=", ".join(vocabulary or []) or "(none yet)",
     )
     return (await _generate_text(spec["system"], prompt, cfg)).strip()
-
-
-# --- scheduled synthesis digest ---
-
-_DIGEST_SYSTEM = (
-    "You write a digest of recent changes in a personal TiddlyWiki notebook. "
-    "Write TiddlyWiki wikitext: '!!' for headings, '*' for bullets, and link "
-    "to notes as [[Note Title]] using the exact titles given. Group related "
-    "changes, lead with the most significant, and keep it under 300 words. "
-    "Reply with only the digest."
-)
-
-
-async def digest_text(
-    tiddlers: list[dict], cfg, period: str = "the last 7 days"
-) -> tuple[str, list[str]]:
-    """Synthesize a what-changed digest over the given (recently modified,
-    best-first) tiddlers. Returns (wikitext, titles that fit the context)."""
-    context, titles = _build_context(tiddlers)
-    prompt = (
-        f"These notes changed in {period}, most recently modified first:\n\n"
-        f"{context}\n\nWrite the digest."
-    )
-    text = await _generate_text(_DIGEST_SYSTEM, prompt, cfg)
-    return text.strip(), titles
