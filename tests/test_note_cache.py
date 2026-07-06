@@ -128,3 +128,18 @@ def test_check_bumps_last_seen(tmp_path):
     cache.check([h])  # bump
     assert cache.prune(ttl_days=30) == 0
     cache.close()
+
+
+def test_get_many_bumps_last_seen(tmp_path):
+    """Resolving a ref counts as use: a warm client sends confirmed notes as
+    bare refs and skips /notes/check, so get_many is the only place an active
+    note is 'seen' — it must refresh the retention window or the note ages out
+    from under the tab and forces a needless 409 resend."""
+    cache = NoteCache(str(tmp_path / "notes.sqlite3"))
+    cache.put_many([{"title": "T", "text": "x", "fields": {}}])
+    h = canonical_hash("T", "x", "")
+    cache._db.execute("UPDATE notes SET last_seen = ?", (time.time() - 40 * 86400,))
+    cache._db.commit()
+    assert cache.get_many([h]) == {h: {"title": "T", "text": "x", "fields": {}}}
+    assert cache.prune(ttl_days=30) == 0
+    cache.close()

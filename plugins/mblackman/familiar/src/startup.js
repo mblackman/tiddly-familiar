@@ -424,7 +424,8 @@ exports.startup = function() {
         title: title,
         text: text,
         fields: tags ? {tags: tags} : {},
-        hash: noteHash(title, text, tags)
+        hash: noteHash(title, text, tags),
+        modified: modSig(t)
       };
     }
 
@@ -437,11 +438,78 @@ exports.startup = function() {
     var syncState = {};
     var pendingPush = {};   // titles changed since the last flush
     var pushTimer = null;
+    var persistTimer = null;
     var PUSH_DEBOUNCE_MS = 5000;
     var SCAN_SLICE = 25;    // titles hashed per idle slice
     var SYNC_BATCH_NOTES = 100;
     var SYNC_BATCH_CHARS = 500000;
+    var SYNC_CHECK_BATCH = 1000; // hashes per /notes/check (server caps at 2000)
+    var SYNC_RETRY_BASE_MS = 3000;
+    var SYNC_RETRY_MAX = 5;      // attempts before giving up (edits re-arm later)
     var SYNC_STATUS = "$:/temp/familiar/sync-status";
+
+    // --- cross-reload persistence of the sync map ---
+    // syncState is rebuilt on every wiki load; without this the whole corpus is
+    // re-hashed (slow pure-JS sha256) each time. We persist title -> {hash,
+    // synced, modified} in localStorage and, at scan time, reuse the stored
+    // hash for any note whose `modified` stamp is unchanged — so a reload only
+    // hashes notes edited while the tab was closed. Trusting a persisted
+    // `synced` flag is safe: if the server pruned it meanwhile, the ask path's
+    // 409 resend heals it. Best-effort — localStorage may be absent (file://,
+    // private mode) or full, in which case we silently fall back to a full scan.
+    var SYNC_PERSIST_KEY = "familiar:syncState:" +
+      (typeof location !== "undefined" ? (location.host + location.pathname) : "");
+    function modSig(tiddler) {
+      return tiddler && tiddler.fields.modified
+        ? $tw.utils.stringifyDate(tiddler.fields.modified) : "";
+    }
+    function loadPersistedSync() {
+      try {
+        var raw = window.localStorage.getItem(SYNC_PERSIST_KEY);
+        var obj = raw ? JSON.parse(raw) : null;
+        return (obj && typeof obj === "object") ? obj : {};
+      } catch (e) { return {}; }
+    }
+    function persistSyncState() {
+      try {
+        var out = {};
+        for (var title in syncState) {
+          var e = syncState[title];
+          out[title] = {hash: e.hash, synced: !!e.synced, modified: e.modified || ""};
+        }
+        window.localStorage.setItem(SYNC_PERSIST_KEY, JSON.stringify(out));
+      } catch (e) { /* unavailable or over quota: persistence is optional */ }
+    }
+    function schedulePersist() {
+      if (persistTimer) return;
+      persistTimer = setTimeout(function() {
+        persistTimer = null;
+        persistSyncState();
+      }, 2000);
+    }
+
+    // POST hashes to /notes/check in <=SYNC_CHECK_BATCH chunks — a wiki with
+    // thousands of notes would 422 a single request (server cap 2000) and, with
+    // no retry, wedge sync in "degraded" forever. Resolves to a {hash:true} set
+    // of the hashes the server is missing.
+    function checkHashes(hashes) {
+      var missing = {};
+      function step(i) {
+        if (i >= hashes.length) return Promise.resolve(missing);
+        return fetch(baseURL() + "/notes/check", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({hashes: hashes.slice(i, i + SYNC_CHECK_BATCH)})
+        }).then(function(r) {
+          if (!r.ok) throw new Error("notes/check " + r.status);
+          return r.json();
+        }).then(function(d) {
+          (d.missing || []).forEach(function(h) { missing[h] = true; });
+          return step(i + SYNC_CHECK_BATCH);
+        });
+      }
+      return step(0);
+    }
 
     // Upload full content for `titles` in budgeted sequential batches. A note
     // is only marked synced if its hash is still the one that was pushed —
@@ -473,6 +541,7 @@ exports.startup = function() {
             delete pendingPush[n.title];
           }
         });
+        schedulePersist();
         return pushTitles(rest);
       });
     }
@@ -481,10 +550,27 @@ exports.startup = function() {
       if (pushTimer) clearTimeout(pushTimer);
       pushTimer = setTimeout(function() {
         pushTimer = null;
-        pushTitles(Object.keys(pendingPush)).catch(function(err) {
-          dbg("background push failed (" + err.message + ") - asks still work");
-        });
+        flushPending(0);
       }, PUSH_DEBOUNCE_MS);
+    }
+
+    // Flush queued edits with bounded backoff. A transient failure used to be
+    // logged and dropped until the next edit re-armed the timer; now it retries
+    // so a brief gateway blip self-heals. pushTitles clears each note from
+    // pendingPush as it confirms, so a retry only re-sends what's still pending.
+    function flushPending(attempt) {
+      var titles = Object.keys(pendingPush);
+      if (!titles.length) return;
+      pushTitles(titles).catch(function(err) {
+        if (attempt + 1 >= SYNC_RETRY_MAX) {
+          dbg("background push failed after retries (" + err.message +
+              ") - will retry on next edit; asks still work");
+          return;
+        }
+        var delay = SYNC_RETRY_BASE_MS * Math.pow(2, attempt);
+        dbg("background push failed (" + err.message + ") - retrying in " + delay + "ms");
+        setTimeout(function() { flushPending(attempt + 1); }, delay);
+      });
     }
 
     // Keep the map current: rehash changed notes (one note per event — cheap)
@@ -498,27 +584,30 @@ exports.startup = function() {
       for (var title in changes) {
         if (title.indexOf("$:/") === 0) continue;
         if (changes[title].deleted) {
+          if (syncState[title]) dirty = true; // drop it from the persisted map too
           delete syncState[title];
           delete pendingPush[title];
           continue;
         }
         var n = readNote(title);
         if (!n) continue;
-        syncState[title] = {hash: n.hash, synced: false};
+        syncState[title] = {hash: n.hash, synced: false, modified: n.modified};
         pendingPush[title] = true;
         dirty = true;
       }
-      if (dirty) armPushFlush();
+      if (dirty) { schedulePersist(); armPushFlush(); }
     });
 
-    // Hash the whole wiki once, in idle-time slices so startup never janks,
-    // then warm the server: one /notes/check over everything, upload the
-    // missing notes. After this, steady-state asks are pure hash refs with
-    // no preflight and no hashing.
+    // Build the sync map at startup, in idle-time slices so nothing janks:
+    // reuse persisted hashes for notes unchanged since last load, rehash the
+    // rest, then warm the server (chunked /notes/check, upload the missing).
+    // After this, steady-state asks are pure hash refs with no preflight and
+    // no hashing.
     function startInitialScan() {
       setState(SYNC_STATUS, "scanning");
+      var persisted = loadPersistedSync();
       var titles = $tw.wiki.filterTiddlers("[!is[system]]");
-      var i = 0;
+      var i = 0, reused = 0;
       function idle(fn) {
         if (typeof requestIdleCallback === "function") requestIdleCallback(fn);
         else setTimeout(fn, 50);
@@ -526,44 +615,63 @@ exports.startup = function() {
       function slice() {
         var end = Math.min(i + SCAN_SLICE, titles.length);
         for (; i < end; i++) {
-          if (!syncState[titles[i]]) { // change handler may have beaten us
-            var n = readNote(titles[i]);
-            if (n) syncState[titles[i]] = {hash: n.hash, synced: false};
+          var title = titles[i];
+          if (syncState[title]) continue; // change handler may have beaten us
+          var t = $tw.wiki.getTiddler(title);
+          if (!t) continue;
+          var prev = persisted[title], sig = modSig(t);
+          if (prev && prev.hash && sig && prev.modified === sig) {
+            // Unchanged since last session: reuse the stored hash and the
+            // server-confirmed flag, skipping the (slow) rehash. A stale
+            // `synced` (server pruned it) self-heals via the ask 409 path.
+            syncState[title] = {hash: prev.hash, synced: !!prev.synced, modified: sig};
+            reused++;
+          } else {
+            var n = readNote(title);
+            if (n) syncState[title] = {hash: n.hash, synced: false, modified: n.modified};
           }
         }
         if (i < titles.length) return idle(slice);
-        warmServer();
+        dbg("scan done - " + titles.length + " note(s), " + reused + " reused from cache");
+        warmServerWithRetry(0);
       }
       idle(slice);
+    }
+
+    // Warm the server, retrying transient failures with bounded backoff so a
+    // gateway that's briefly down at load doesn't strand sync in "degraded"
+    // until a manual reload. Success flips status to "ready" inside warmServer.
+    function warmServerWithRetry(attempt) {
+      warmServer().catch(function(err) {
+        setState(SYNC_STATUS, "degraded");
+        if (attempt + 1 >= SYNC_RETRY_MAX) {
+          dbg("sync warm failed after retries (" + err.message +
+              ") - asks degrade to full sends");
+          return;
+        }
+        var delay = SYNC_RETRY_BASE_MS * Math.pow(2, attempt);
+        dbg("sync warm failed (" + err.message + ") - retrying in " + delay + "ms");
+        setTimeout(function() { warmServerWithRetry(attempt + 1); }, delay);
+      });
     }
 
     function warmServer() {
       var titles = Object.keys(syncState);
       var toCheck = titles.filter(function(t) { return !syncState[t].synced; });
-      fetch(baseURL() + "/notes/check", {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({hashes: toCheck.map(function(t) { return syncState[t].hash; })})
-      }).then(function(r) {
-        if (!r.ok) throw new Error("notes/check " + r.status);
-        return r.json();
-      }).then(function(d) {
-        var missing = {};
-        (d.missing || []).forEach(function(h) { missing[h] = true; });
-        var toPush = [];
-        toCheck.forEach(function(t) {
-          if (missing[syncState[t].hash]) toPush.push(t);
-          else syncState[t].synced = true;
+      return checkHashes(toCheck.map(function(t) { return syncState[t].hash; }))
+        .then(function(missing) {
+          var toPush = [];
+          toCheck.forEach(function(t) {
+            if (missing[syncState[t].hash]) toPush.push(t);
+            else syncState[t].synced = true;
+          });
+          return pushTitles(toPush).then(function() {
+            schedulePersist();
+            setState(SYNC_STATUS, "ready");
+            dbg("sync warm done - " + titles.length + " note(s) tracked, " +
+                toPush.length + " pushed");
+          });
         });
-        return pushTitles(toPush).then(function() {
-          setState(SYNC_STATUS, "ready");
-          dbg("sync warm done - " + titles.length + " note(s) tracked, " +
-              toPush.length + " pushed");
-        });
-      }).catch(function(err) {
-        setState(SYNC_STATUS, "degraded");
-        dbg("sync warm failed (" + err.message + ") - asks degrade to full sends");
-      });
     }
 
     // Build the ask payload from the sync map: refs for server-confirmed
@@ -624,21 +732,14 @@ exports.startup = function() {
         build();
         return Promise.resolve(payload);
       }
-      return fetch(baseURL() + "/notes/check", {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({hashes: unsynced.map(function(n) { return n.hash; })})
-      }).then(function(r) {
-        if (!r.ok) throw new Error("notes/check " + r.status);
-        return r.json();
-      }).then(function(d) {
-        var missing = {};
-        (d.missing || []).forEach(function(h) { missing[h] = true; });
+      return checkHashes(unsynced.map(function(n) { return n.hash; })).then(function(missing) {
+        var confirmed = false;
         unsynced.forEach(function(n) {
           var e = syncState[n.title];
           if (missing[n.hash]) mustSend[n.hash] = true;
-          else if (e && e.hash === n.hash) e.synced = true;
+          else if (e && e.hash === n.hash) { e.synced = true; confirmed = true; }
         });
+        if (confirmed) schedulePersist();
         build();
         return payload;
       }).catch(function(err) {

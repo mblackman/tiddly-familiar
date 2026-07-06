@@ -57,6 +57,10 @@ class NoteCache:
         # request handlers (and the TestClient portal thread in tests); the
         # sqlite3 module serializes access internally.
         self._db = sqlite3.connect(path, check_same_thread=False)
+        # WAL lets ask-path readers (ref resolution) proceed while a background
+        # /notes/sync writes, instead of every access serializing on one lock —
+        # this store is read-mostly and hit concurrently by several tabs.
+        self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute(
             "CREATE TABLE IF NOT EXISTS notes ("
             " hash TEXT PRIMARY KEY, title TEXT NOT NULL, text TEXT NOT NULL,"
@@ -74,6 +78,7 @@ class NoteCache:
         """Return the subset of `hashes` present, bumping their last_seen."""
         present: set[str] = set()
         now = time.time()
+        dirty = False
         for chunk in _chunks(hashes):
             marks = ",".join("?" * len(chunk))
             rows = self._db.execute(
@@ -87,12 +92,20 @@ class NoteCache:
                     f" ({','.join('?' * len(found))})",
                     [now, *found],
                 )
-        self._db.commit()
+                dirty = True
+        if dirty:  # an all-miss preflight (steady state) touches nothing to commit
+            self._db.commit()
         return present
 
     def get_many(self, hashes: list[str]) -> dict[str, dict]:
-        """Resolve hashes to {title, text, fields} dicts; absent keys omitted."""
+        """Resolve hashes to {title, text, fields} dicts; absent keys omitted.
+
+        Bumps last_seen on every resolved hash: a note referenced on every ask
+        but never edited is only ever seen here (a warm client sends it as a
+        bare ref and skips /notes/check), so without this it would age out from
+        under an active tab and force a needless 409 resend."""
         out: dict[str, dict] = {}
+        found: list[str] = []
         for chunk in _chunks(hashes):
             marks = ",".join("?" * len(chunk))
             rows = self._db.execute(
@@ -102,6 +115,16 @@ class NoteCache:
             ).fetchall()
             for h, title, text, fields in rows:
                 out[h] = {"title": title, "text": text, "fields": json.loads(fields)}
+                found.append(h)
+        if found:
+            now = time.time()
+            for chunk in _chunks(found):
+                self._db.execute(
+                    f"UPDATE notes SET last_seen = ?"
+                    f" WHERE hash IN ({','.join('?' * len(chunk))})",
+                    [now, *chunk],
+                )
+            self._db.commit()
         return out
 
     def put_many(self, tiddlers: list[dict]) -> None:
