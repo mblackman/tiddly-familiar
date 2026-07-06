@@ -230,6 +230,43 @@ def test_client_related(client, monkeypatch):
     assert data["cache"] == {"hits": 0, "misses": 1}
 
 
+def test_client_search(client, monkeypatch):
+    async def fake_search(query, tiddlers, embedder, top_k, max_embed=None):
+        assert query == "striped horse"
+        assert [t["title"] for t in tiddlers] == ["Zebra"]
+        return [{"title": "Zebra", "score": 0.91, "snippet": "striped horse."}], False
+
+    monkeypatch.setattr(service, "ai_search", fake_search)
+    resp = client.post(
+        "/search",
+        json={"query": "striped horse", "tiddlers": [ZEBRA], "k": 5},
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["results"] == [
+        {"title": "Zebra", "score": 0.91, "snippet": "striped horse."}
+    ]
+    assert data["cache"] == {"hits": 0, "misses": 1}
+
+
+def test_client_search_hash_ref_resolves_from_cache(client, monkeypatch):
+    """Search shares the note cache: a warmed hash ref needs no full send."""
+
+    async def fake_search(query, tiddlers, embedder, top_k, max_embed=None):
+        return [{"title": t["title"], "score": 1.0, "snippet": ""} for t in tiddlers], False
+
+    monkeypatch.setattr(service, "ai_search", fake_search)
+    client.post("/notes/sync", json={"tiddlers": [ZEBRA]}, headers=AUTH)
+    resp = client.post(
+        "/search",
+        json={"query": "q", "tiddlers": [{"hash": ZEBRA_HASH}]},
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["cache"] == {"hits": 1, "misses": 0}
+
+
 def test_client_generate(client, monkeypatch):
     async def fake_run_command(command, title, text, cfg, vocabulary=None):
         assert (command, title, text) == ("summarize", "Zebra", "rendered text")
@@ -312,6 +349,7 @@ def test_client_routes_require_auth(client):
     assert client.post("/ask", json={"question": "q"}).status_code == 403
     assert client.post("/ask/stream", json={"question": "q"}).status_code == 403
     assert client.post("/related", json={"target": ZEBRA}).status_code == 403
+    assert client.post("/search", json={"query": "q"}).status_code == 403
     assert client.post("/notes/check", json={"hashes": []}).status_code == 403
     assert client.post("/notes/sync", json={"tiddlers": []}).status_code == 403
 

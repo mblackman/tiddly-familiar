@@ -149,27 +149,25 @@ async def _score_candidate_chunks(
     return records, cos, truncated
 
 
-async def retrieve(
+async def _rank_hybrid(
     question: str,
-    tiddlers: list[dict],
+    candidates: list[dict],
     embedder: Embedder,
     top_k: int,
-    max_embed: int | None = None,
-) -> tuple[list[dict], bool]:
-    """Hybrid chunked retrieval. Returns (selected, truncated) where selected
-    is the top-k tiddlers as [{title, text}] — text already excerpted to the
-    per-tiddler budget — ordered most relevant first.
+    max_embed: int | None,
+) -> tuple[list[int], dict[int, float], dict[int, list[tuple[int, str, float]]], bool]:
+    """Hybrid chunked ranking shared by `retrieve` and `search`.
 
     Every chunk of every candidate is cosine-scored against the question
     (chunks without a cached vector score 0 there, see `max_embed` in
     `Embedder.embed_documents`), then the parent tiddler's keyword overlap is
     added, so an exact title/tag/term match surfaces even before its
     embeddings are warm. A tiddler ranks by its best chunk.
-    """
-    candidates = [t for t in tiddlers if t.get("text", "").strip()]
-    if not candidates:
-        return [], False
 
+    Returns (top, best, scored_chunks, truncated): `top` is the top-k candidate
+    indices best-first, `best[ci]` each candidate's winning chunk score, and
+    `scored_chunks[ci]` its (offset, chunk, score) triples for excerpting.
+    """
     query_vec = await embedder.embed_query(question)
     records, cos, truncated = await _score_candidate_chunks(
         query_vec, candidates, embedder, max_embed
@@ -186,6 +184,28 @@ async def retrieve(
         scored_chunks.setdefault(ci, []).append((offset, chunk, score))
 
     top = sorted(best, key=lambda ci: -best[ci])[:top_k]
+    return top, best, scored_chunks, truncated
+
+
+async def retrieve(
+    question: str,
+    tiddlers: list[dict],
+    embedder: Embedder,
+    top_k: int,
+    max_embed: int | None = None,
+) -> tuple[list[dict], bool]:
+    """Hybrid chunked retrieval (see `_rank_hybrid`). Returns
+    (selected, truncated) where selected is the top-k tiddlers as
+    [{title, text}] — text already excerpted to the per-tiddler budget —
+    ordered most relevant first.
+    """
+    candidates = [t for t in tiddlers if t.get("text", "").strip()]
+    if not candidates:
+        return [], False
+
+    top, _best, scored_chunks, truncated = await _rank_hybrid(
+        question, candidates, embedder, top_k, max_embed
+    )
     selected = [
         {
             "title": _title(candidates[ci]),
@@ -194,6 +214,55 @@ async def retrieve(
         for ci in top
     ]
     return selected, truncated
+
+
+# Search results carry a short preview, not the generation-sized excerpt.
+_SNIPPET_BUDGET = 240
+
+
+def _snippet(text: str, chunks: list[tuple[int, str, float]]) -> str:
+    """A short preview around a tiddler's best-scoring chunk, for search
+    results (ellipses mark elision at either end)."""
+    if not chunks:
+        return text[:_SNIPPET_BUDGET].strip()
+    offset, chunk, _score = max(chunks, key=lambda c: c[2])
+    body = chunk[:_SNIPPET_BUDGET].strip()
+    if offset > 0:
+        body = "…" + body
+    if offset + len(body) < len(text):
+        body = body + "…"
+    return body
+
+
+async def search(
+    question: str,
+    tiddlers: list[dict],
+    embedder: Embedder,
+    top_k: int,
+    max_embed: int | None = None,
+) -> tuple[list[dict], bool]:
+    """Ranked semantic search: the same hybrid retrieval as `retrieve`, but
+    returns scored results with short snippets and runs no generation model.
+    Zero-score candidates are dropped — there is nothing relevant to show.
+    Returns ([{title, score, snippet}], truncated), best first.
+    """
+    candidates = [t for t in tiddlers if t.get("text", "").strip()]
+    if not candidates:
+        return [], False
+
+    top, best, scored_chunks, truncated = await _rank_hybrid(
+        question, candidates, embedder, top_k, max_embed
+    )
+    results = [
+        {
+            "title": _title(candidates[ci]),
+            "score": round(best[ci], 4),
+            "snippet": _snippet(candidates[ci].get("text", ""), scored_chunks[ci]),
+        }
+        for ci in top
+        if best[ci] > 0
+    ]
+    return results, truncated
 
 
 async def related(
@@ -271,6 +340,44 @@ _SYSTEM_INSTRUCTION = (
     "syntax: [[Note Title]] — use the exact title as given in the notes. "
     "If the notes don't contain enough information, say so."
 )
+
+
+_QUERY_REWRITE_SYSTEM = (
+    "You rewrite a follow-up question into a standalone search query for a "
+    "personal notebook. Resolve pronouns and references using the "
+    "conversation, keep the user's own wording where you can, and output ONLY "
+    "the rewritten query — no preamble, no quotes, no explanation. If the "
+    "question already stands on its own, return it unchanged."
+)
+
+
+async def _rewrite_query(
+    question: str, history: list[dict] | None, cfg
+) -> str:
+    """Fold recent chat context into a standalone retrieval query so follow-ups
+    ("what about the second one?") retrieve on their real intent, not their
+    literal words.
+
+    Best-effort: returns `question` unchanged when rewriting is disabled, when
+    there is no history to draw on, or if the rewrite generation fails —
+    retrieval must never break because the rewrite did. Only retrieval uses the
+    result; generation still sees the original question and full history.
+    """
+    if not getattr(cfg, "query_rewrite", True):
+        return question
+    turns = _trim_history(history)
+    if not turns:
+        return question
+    convo = "\n".join(f"{t['role']}: {t['content']}" for t in turns)
+    prompt = (
+        f"Conversation so far:\n{convo}\n\n"
+        f"Follow-up question: {question}\n\nStandalone search query:"
+    )
+    try:
+        rewritten = (await _generate_text(_QUERY_REWRITE_SYSTEM, prompt, cfg)).strip()
+    except Exception:
+        return question
+    return rewritten or question
 
 
 def _trim_history(history: list[dict] | None) -> list[dict]:
@@ -487,12 +594,14 @@ async def answer_question(
     True while some chunks were skipped (i.e. the answer may not have seen
     everything yet).
 
-    `history` is prior chat turns as [{role: user|assistant, content}] —
-    retrieval ranks by the current question alone; history only shapes the
-    generated answer (follow-ups, pronouns).
+    `history` is prior chat turns as [{role: user|assistant, content}]. When
+    `cfg.query_rewrite` is on, retrieval ranks by a standalone query distilled
+    from the history + question (see `_rewrite_query`); generation always sees
+    the original question and full history.
     """
+    retrieval_query = await _rewrite_query(question, history, cfg)
     selected, truncated = await retrieve(
-        question, tiddlers, embedder, cfg.rag_top_k, max_embed=max_embed
+        retrieval_query, tiddlers, embedder, cfg.rag_top_k, max_embed=max_embed
     )
     if not selected:
         return {
@@ -517,8 +626,9 @@ async def answer_question_stream(
     generation call streams. Yields ("delta", {text}) per model fragment, then
     one final ("done", {answer, sources, truncated}) with the assembled answer
     (sources need the full text, so they can only be extracted at the end)."""
+    retrieval_query = await _rewrite_query(question, history, cfg)
     selected, truncated = await retrieve(
-        question, tiddlers, embedder, cfg.rag_top_k, max_embed=max_embed
+        retrieval_query, tiddlers, embedder, cfg.rag_top_k, max_embed=max_embed
     )
     if not selected:
         yield (

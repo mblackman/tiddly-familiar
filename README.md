@@ -36,7 +36,8 @@ TiddlyWiki the plugin is installed in — no per-wiki server config.
 
 | | |
 |---|---|
-| **Ask your notes** | Sidebar chat with streaming answers, a collapsible source list, and an optional TiddlyWiki filter to scope which notes are searched. |
+| **Ask your notes** | Sidebar chat with streaming answers, a collapsible source list, and an optional TiddlyWiki filter to scope which notes are searched. Follow-up questions are resolved against the conversation before retrieval, so "what about the second one?" still finds the right notes. |
+| **Semantic search** | Flip the sidebar to **Search** for a ranked list of matching notes — scored, with snippets, no AI answer (and no LLM cost). Honours the same scope filter as Ask. |
 | **Saved & in-note chats** | Persist a conversation as a regular note (one tiddler per turn) that syncs and survives reload; tag any note `ai-chat` to chat right inside it. |
 | **Summarize** | Toolbar button on any tiddler — writes an AI summary to a `summary` field, shown above the body. |
 | **Suggest tags / Extract tasks** | One-click suggestions drawn from the note's rendered text; tags are proposed from your existing tag vocabulary. |
@@ -86,6 +87,7 @@ The gateway listens on `:8787`. Point the plugin's **Gateway URL** at it
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | Gemini generation (default backend) |
 | `LLM_BACKEND=ollama`, `OLLAMA_LLM_MODEL`, `OLLAMA_URL` | Fully-local generation instead of Gemini |
 | `EMBED_MODEL`, `RAG_TOP_K`, `PROFILES_DIR` | Embedding model, retrieval depth, data dir |
+| `RAG_QUERY_REWRITE` | Rewrite follow-ups into a standalone retrieval query (default on; one extra generation call per follow-up) |
 
 ## How it works
 

@@ -13,6 +13,7 @@ from google.genai import errors as genai_errors
 from .ai import COMMANDS, GenerationError, answer_question, answer_question_stream
 from .ai import related as ai_related
 from .ai import run_command
+from .ai import search as ai_search
 from .embeddings import EmbeddingError
 
 
@@ -141,6 +142,29 @@ async def related_with_tiddlers(
     except EmbeddingError as e:
         raise AskError(str(e), 503) from e
     return {"related": items, "truncated": truncated}
+
+
+async def search_with_tiddlers(
+    query: str,
+    tiddlers: list[dict],
+    *,
+    embedder,
+    k: int = 10,
+    max_tiddlers: int = 100,
+) -> dict:
+    """Ranked semantic search over the supplied candidates — no generation
+    model involved. Returns {results: [{title, score, snippet}], truncated}."""
+    try:
+        items, truncated = await ai_search(
+            query,
+            tiddlers,
+            embedder,
+            top_k=max(1, k),
+            max_embed=max(1, max_tiddlers),
+        )
+    except EmbeddingError as e:
+        raise AskError(str(e), 503) from e
+    return {"results": items, "truncated": truncated}
 
 
 def _parse_tags(result: str) -> list[str]:

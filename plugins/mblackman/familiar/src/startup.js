@@ -56,6 +56,7 @@ exports.startup = function() {
     var LOCAL_MAX_TOTAL = 2000000;
 
     var CHAT_PREFIX = "$:/temp/familiar/chat/";
+    var SEARCH_RESULT_PREFIX = "$:/temp/familiar/search/result/";
     var CHAT_NOTE_STATE = "$:/state/familiar/chat-note";
     var NEW_TITLE_STATE = "$:/state/familiar/new-chat-title";
     var NEW_NOTE_OPEN_STATE = "$:/state/familiar/new-note-open";
@@ -76,6 +77,11 @@ exports.startup = function() {
       var fields = {title: title, text: text};
       if (type) fields.type = type;
       $tw.wiki.addTiddler(new $tw.Tiddler(fields));
+    }
+
+    function clearSearchResults() {
+      $tw.wiki.filterTiddlers("[prefix[" + SEARCH_RESULT_PREFIX + "]]")
+        .forEach(function(t) { $tw.wiki.deleteTiddler(t); });
     }
 
     function rejectWithDetail(r) {
@@ -689,6 +695,20 @@ exports.startup = function() {
           if (!r.ok) return rejectWithDetail(r);
           return r.json();
         });
+      },
+      // Ranked semantic search over the notes matched by `filter` (or the
+      // whole wiki). No generation — resolves to {results:[{title,score,
+      // snippet}], truncated, cache}, with the same "searched N of M" notice
+      // as ask when the corpus is capped.
+      search: function(query, filter, k) {
+        return localPayload(filter).then(function(p) {
+          return localFetch("/search", p, function(tiddlers) {
+            return {query: query, tiddlers: tiddlers, k: k || 10};
+          }).then(function(r) {
+            if (!r.ok) return rejectWithDetail(r);
+            return r.json().then(function(data) { return annotateLocal(data, p); });
+          });
+        });
       }
     };
 
@@ -973,6 +993,54 @@ exports.startup = function() {
         setState(stateTitle, "//" + askErrorMessage(err) + "//");
         setState("$:/state/familiar/related-loading", "");
         dbg("related FAILED (" + (err.status || "network") + "): " + err.message);
+      });
+    });
+
+    // Sidebar semantic search: rank the notes (optionally filtered) by the
+    // query and render a scored, snippeted list — no generation. Shares the
+    // composer's question/filter state with ask; the panel's mode toggle
+    // decides which message the send button fires.
+    $tw.rootWidget.addEventListener("tm-familiar-search", function() {
+      if (($tw.wiki.getTiddlerText("$:/state/familiar/searching") || "") === "yes") return;
+      var query  = ($tw.wiki.getTiddlerText("$:/state/familiar/question") || "").trim();
+      var filter = ($tw.wiki.getTiddlerText("$:/state/familiar/filter")   || "").trim();
+      dbg("tm-familiar-search fired; query=" + JSON.stringify(query) + " filter=" + JSON.stringify(filter));
+      if (!query) {
+        setState("$:/state/familiar/search-results", "//Type something to search for.//");
+        return;
+      }
+      clearSearchResults();
+      setState("$:/state/familiar/searching", "yes");
+      setState("$:/state/familiar/search-results", "");
+      $tw.Familiar.search(query, filter, 10).then(function(data) {
+        var results = data.results || [];
+        // Each result is its own tiddler; the panel renders them with a $list
+        // widget (repeating one parsed template — a transcluded string of many
+        // sibling <div> blocks only renders the first couple). Snippets show
+        // via <$view field> so note text is never re-parsed as wikitext.
+        results.forEach(function(r, i) {
+          $tw.wiki.addTiddler(new $tw.Tiddler({
+            title: SEARCH_RESULT_PREFIX + padTurn(i + 1),
+            caption: r.title,
+            score: String(Math.round((r.score || 0) * 100)),
+            snippet: (r.snippet || "").replace(/\s+/g, " ").trim()
+          }));
+        });
+        var note = "";
+        if (!results.length) {
+          note = data.truncated
+            ? "//No matches yet — the index is still warming, try again.//"
+            : "//No matches.//";
+        } else if (data.local_note) {
+          note = "//(" + data.local_note + " — narrow the filter to cover the rest)//";
+        }
+        setState("$:/state/familiar/search-results", note);
+        setState("$:/state/familiar/searching", "");
+        dbg("search ok; results=" + results.length);
+      }).catch(function(err) {
+        setState("$:/state/familiar/search-results", "//" + askErrorMessage(err) + "//");
+        setState("$:/state/familiar/searching", "");
+        dbg("search FAILED (" + (err.status || "network") + "): " + err.message);
       });
     });
 

@@ -174,6 +174,20 @@ class ClientRelatedBody(BaseModel):
         return self
 
 
+class ClientSearchBody(BaseModel):
+    query: str = Field(min_length=1)
+    tiddlers: list[ClientTiddler] = Field(
+        default_factory=list, max_length=MAX_CLIENT_TIDDLERS
+    )
+    k: int = Field(10, ge=1, le=50)
+    max_tiddlers: int = Field(100, ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def _budget(self):
+        _check_total_budget(self.tiddlers)
+        return self
+
+
 class ClientGenerateBody(BaseModel):
     """Generate over client-supplied text: the browser renders the note to
     plain text itself (the server can't render a wiki it has no session for)
@@ -342,6 +356,26 @@ async def client_generate(body: ClientGenerateBody):
         raise HTTPException(status_code=e.status, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/search", dependencies=[Depends(require_auth)])
+async def client_search(body: ClientSearchBody):
+    """Ranked semantic search over the sent notes — same hybrid retrieval as
+    /ask, but returns scored {title, snippet} results with no generation."""
+    tiddlers, cache_stats = _resolve_client_tiddlers(body.tiddlers)
+    try:
+        result = await service.search_with_tiddlers(
+            body.query,
+            tiddlers,
+            embedder=_embedder,
+            k=body.k,
+            max_tiddlers=body.max_tiddlers,
+        )
+    except service.AskError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {**result, "cache": cache_stats}
 
 
 @app.post("/related", dependencies=[Depends(require_auth)])

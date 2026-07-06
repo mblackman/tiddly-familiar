@@ -2,6 +2,7 @@
 and the local-LLM generation backend."""
 
 import asyncio
+import types
 
 import httpx
 import pytest
@@ -16,6 +17,7 @@ from app.ai import (
     _generate_ollama,
     _keyword_score,
     _query_terms,
+    _rewrite_query,
 )
 
 
@@ -131,6 +133,92 @@ def test_excerpt_merges_overlapping_chunks(monkeypatch):
     ]
     # The two winners overlap on "cc" — merged into one continuous span.
     assert _excerpt(text, chunks) == "bbbbccccdd"
+
+
+# --- history-aware query rewrite ---
+
+
+HISTORY = [
+    {"role": "user", "content": "How is Wireguard configured?"},
+    {"role": "assistant", "content": "Via the wg0 interface on the router."},
+]
+
+
+def test_rewrite_query_no_history_skips_generation(monkeypatch):
+    """No prior turns → the question is already standalone; no LLM call."""
+    called = False
+
+    async def fake_generate(system, prompt, cfg, history=None):
+        nonlocal called
+        called = True
+        return "SHOULD NOT BE USED"
+
+    monkeypatch.setattr(ai, "_generate_text", fake_generate)
+    cfg = types.SimpleNamespace(query_rewrite=True)
+    out = asyncio.run(_rewrite_query("what is it?", [], cfg))
+    assert out == "what is it?"
+    assert called is False
+
+
+def test_rewrite_query_disabled_returns_question(monkeypatch):
+    async def fake_generate(system, prompt, cfg, history=None):
+        raise AssertionError("rewrite disabled: must not generate")
+
+    monkeypatch.setattr(ai, "_generate_text", fake_generate)
+    cfg = types.SimpleNamespace(query_rewrite=False)
+    assert asyncio.run(_rewrite_query("what about it?", HISTORY, cfg)) == "what about it?"
+
+
+def test_rewrite_query_folds_history(monkeypatch):
+    seen = {}
+
+    async def fake_generate(system, prompt, cfg, history=None):
+        seen["prompt"] = prompt
+        return "  How is Wireguard configured on the router?  "
+
+    monkeypatch.setattr(ai, "_generate_text", fake_generate)
+    cfg = types.SimpleNamespace(query_rewrite=True)
+    out = asyncio.run(_rewrite_query("what about the router?", HISTORY, cfg))
+    assert out == "How is Wireguard configured on the router?"  # stripped
+    assert "Wireguard" in seen["prompt"] and "what about the router?" in seen["prompt"]
+
+
+def test_rewrite_query_failure_falls_back_to_question(monkeypatch):
+    async def fake_generate(system, prompt, cfg, history=None):
+        raise RuntimeError("model down")
+
+    monkeypatch.setattr(ai, "_generate_text", fake_generate)
+    cfg = types.SimpleNamespace(query_rewrite=True)
+    assert asyncio.run(_rewrite_query("what about it?", HISTORY, cfg)) == "what about it?"
+
+
+def test_answer_question_retrieves_on_rewrite_generates_on_original(monkeypatch):
+    """Retrieval must rank by the rewritten query; generation must still see
+    the user's original question."""
+    seen = {}
+
+    async def fake_rewrite(question, history, cfg):
+        return "STANDALONE QUERY"
+
+    async def fake_retrieve(query, tiddlers, embedder, top_k, max_embed=None):
+        seen["retrieval_query"] = query
+        return [{"title": "N", "text": "body"}], False
+
+    async def fake_generate(question, selected, cfg, history=None):
+        seen["generation_question"] = question
+        return {"answer": "a", "sources": []}
+
+    monkeypatch.setattr(ai, "_rewrite_query", fake_rewrite)
+    monkeypatch.setattr(ai, "retrieve", fake_retrieve)
+    monkeypatch.setattr(ai, "_generate", fake_generate)
+    cfg = types.SimpleNamespace(rag_top_k=8, query_rewrite=True)
+
+    out = asyncio.run(
+        ai.answer_question("original?", [{"title": "N", "text": "body"}], object(), cfg)
+    )
+    assert seen["retrieval_query"] == "STANDALONE QUERY"
+    assert seen["generation_question"] == "original?"
+    assert out["truncated"] is False
 
 
 # --- Ollama generation backend ---

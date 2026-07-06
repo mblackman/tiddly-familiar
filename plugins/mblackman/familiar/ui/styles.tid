@@ -571,6 +571,86 @@
   color: #fff;
 }
 
+/* --- ask / search mode toggle --- */
+
+.fam-mode {
+  display: flex;
+  gap: 0.3em;
+  margin-bottom: 0.45em;
+}
+
+.fam-mode-btn {
+  flex: 1;
+  background: <<colour tiddler-background>>;
+  color: <<colour foreground>>;
+  border: 1px solid <<colour tiddler-border>>;
+  border-radius: 999px;
+  padding: 0.15em 0.7em;
+  font-size: 0.8em;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.fam-mode-btn:hover {
+  border-color: var(--fam-accent, #8b5cf6);
+  opacity: 1;
+}
+
+.fam-mode-btn.fam-mode-active {
+  background: var(--fam-accent, #8b5cf6);
+  color: var(--fam-accent-contrast, #fff);
+  border-color: var(--fam-accent, #8b5cf6);
+  opacity: 1;
+}
+
+/* --- semantic search results --- */
+
+.fam-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.fam-result {
+  border-left: 3px solid var(--fam-accent, #8b5cf6);
+  background: <<colour tiddler-background>>;
+  border-radius: 3px;
+  padding: 0.5em 0.75em;
+}
+
+.fam-result-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+}
+
+.fam-result-head a {
+  font-weight: 600;
+}
+
+.fam-result-score {
+  margin-left: auto;
+  font-size: 0.72em;
+  font-variant-numeric: tabular-nums;
+  color: var(--fam-accent, #8b5cf6);
+  opacity: 0.85;
+}
+
+.fam-result-snippet {
+  margin-top: 0.25em;
+  font-size: 0.85em;
+  line-height: 1.35;
+  color: <<colour foreground>>;
+  opacity: 0.72;
+}
+
+.fam-search-note {
+  margin-top: 0.6em;
+  font-size: 0.85em;
+  color: <<colour foreground>>;
+  opacity: 0.7;
+}
+
 /* --- control panel settings tab --- */
 
 .fam-settings-input {

@@ -80,6 +80,32 @@ Create
 
 <div class="fam-chat-log">
 
+<$reveal state="$:/state/familiar/mode" type="match" text="search" tag="div">
+<div class="fam-search">
+<$reveal state="$:/state/familiar/searching" type="match" text="yes" tag="div">
+<div class="fam-turn fam-turn-ai fam-turn-typing"><span class="fam-typing"><span></span><span></span><span></span></span></div>
+</$reveal>
+<div class="fam-search-results">
+<$list filter="[prefix[$:/temp/familiar/search/result/]sort[title]]">
+<div class="fam-result">
+<div class="fam-result-head"><$link to={{!!caption}}><$view field="caption"/></$link><span class="fam-result-score"><$view field="score"/>%</span></div>
+<div class="fam-result-snippet"><$view field="snippet"/></div>
+</div>
+</$list>
+</div>
+<$reveal state="$:/state/familiar/search-results" type="nomatch" text="" tag="div">
+<div class="fam-search-note">{{$:/state/familiar/search-results}}</div>
+</$reveal>
+<$reveal state="$:/state/familiar/searching" type="nomatch" text="yes" tag="div">
+<$reveal state="$:/state/familiar/search-results" type="match" text="" tag="div">
+<$list filter="[prefix[$:/temp/familiar/search/result/]limit[1]]" variable="ignore" emptyMessage="""<div class="fam-empty"><svg class="fam-empty-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M10 4a6 6 0 104.47 10.03l4.75 4.75 1.41-1.41-4.75-4.75A6 6 0 0010 4zm0 2a4 4 0 110 8 4 4 0 010-8z"/></svg><br/>Search your notes by meaning</div>"""></$list>
+</$reveal>
+</$reveal>
+</div>
+</$reveal>
+
+<$reveal state="$:/state/familiar/mode" type="nomatch" text="search" tag="div">
+
 <$reveal state="$:/state/familiar/chat-note" type="match" text="" tag="div">
 <$list filter="[prefix[$:/temp/familiar/chat/]limit[1]]" variable="ignore-has-chat" emptyMessage="""<div class="fam-empty"><svg class="fam-empty-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg><br/>Ask anything about your notes</div>""">
 <div class="fam-chat">
@@ -126,9 +152,22 @@ Create
 </div>
 </$reveal>
 
+</$reveal>
+
 </div>
 
 <div class="fam-composer">
+
+<div class="fam-mode">
+<$button class={{{ [{$:/state/familiar/mode}!match[search]then[fam-mode-btn fam-mode-active]else[fam-mode-btn]] }}} tooltip="Chat: an AI answer synthesised from your notes">
+<$action-setfield $tiddler="$:/state/familiar/mode" text="ask"/>
+Ask
+</$button>
+<$button class={{{ [{$:/state/familiar/mode}match[search]then[fam-mode-btn fam-mode-active]else[fam-mode-btn]] }}} tooltip="Search: a ranked list of matching notes, no AI answer">
+<$action-setfield $tiddler="$:/state/familiar/mode" text="search"/>
+Search
+</$button>
+</div>
 
 <$reveal state="$:/state/familiar/filter-open" type="match" text="yes" tag="div">
 <div class="fam-filter-row">
@@ -152,26 +191,28 @@ its tag
 </div>
 </$reveal>
 
+<$vars sendMsg={{{ [{$:/state/familiar/mode}match[search]then[tm-familiar-search]else[tm-ask-ai]] }}} busyState={{{ [{$:/state/familiar/mode}match[search]then[$:/state/familiar/searching]else[$:/state/familiar/asking]] }}} placeholder={{{ [{$:/state/familiar/mode}match[search]then[Search your notes…]else[Ask your notes…]] }}}>
 <div class="fam-composer-row">
 <$vars filterBtnClass={{{ [{$:/state/familiar/filter}!match[]then[tc-btn-invisible fam-filter-toggle fam-filter-active]else[tc-btn-invisible fam-filter-toggle]] }}}>
-<$button class=<<filterBtnClass>> tooltip="Limit which notes the AI searches">
+<$button class=<<filterBtnClass>> tooltip="Limit which notes are searched">
 <$action-setfield $tiddler="$:/state/familiar/filter-open" text={{{ [{$:/state/familiar/filter-open}match[yes]then[no]else[yes]] }}}/>
 <svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/></svg>
 </$button>
 </$vars>
-<$keyboard key="enter" class="fam-input-wrap" actions="""<$action-sendmessage $message="tm-ask-ai"/>""">
-<$edit-text tiddler="$:/state/familiar/question" tag="textarea" rows="1" autoHeight="yes" minHeight="0px" placeholder="Ask your notes…" class="fam-input"/>
+<$keyboard key="enter" class="fam-input-wrap" actions="""<$action-sendmessage $message=<<sendMsg>>/>""">
+<$edit-text tiddler="$:/state/familiar/question" tag="textarea" rows="1" autoHeight="yes" minHeight="0px" placeholder=<<placeholder>> class="fam-input"/>
 </$keyboard>
-<$reveal state="$:/state/familiar/asking" type="nomatch" text="yes" tag="span">
+<$reveal state=<<busyState>> type="nomatch" text="yes" tag="span">
 <$button class="fam-send" tooltip="Send (Enter)">
-<$action-sendmessage $message="tm-ask-ai"/>
+<$action-sendmessage $message=<<sendMsg>>/>
 <svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
 </$button>
 </$reveal>
-<$reveal state="$:/state/familiar/asking" type="match" text="yes" tag="span">
+<$reveal state=<<busyState>> type="match" text="yes" tag="span">
 <span class="fam-send fam-send-busy"><span class="fam-spinner"></span></span>
 </$reveal>
 </div>
+</$vars>
 
 </div>
 

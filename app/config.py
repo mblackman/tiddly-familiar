@@ -16,6 +16,10 @@ class AppConfig:
     ollama_url: str = "http://ollama:11434"
     embed_model: str = "nomic-embed-text"
     rag_top_k: int = 8
+    # Fold prior chat turns into a standalone retrieval query before ranking
+    # (one extra generation call per follow-up). Off → retrieve by the raw
+    # question, as before.
+    query_rewrite: bool = True
     # Generation backend: "gemini" (default) or "ollama" for fully-local asks.
     llm_backend: str = "gemini"
     ollama_llm_model: str = "llama3.2"
@@ -32,6 +36,8 @@ def load_config() -> AppConfig:
         ollama_url=os.environ.get("OLLAMA_URL", "http://ollama:11434"),
         embed_model=os.environ.get("EMBED_MODEL", "nomic-embed-text"),
         rag_top_k=int(os.environ.get("RAG_TOP_K", "8")),
+        query_rewrite=os.environ.get("RAG_QUERY_REWRITE", "true").strip().lower()
+        not in ("0", "false", "no", "off"),
         llm_backend=os.environ.get("LLM_BACKEND", "gemini"),
         ollama_llm_model=os.environ.get("OLLAMA_LLM_MODEL", "llama3.2"),
     )

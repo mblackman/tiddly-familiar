@@ -18,8 +18,9 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Ollama embedding models have their own context window; keep well under it so a
-# single long tiddler doesn't get silently dropped/errored by the server. This is
-# a coarse char budget (v1 — per-tiddler chunking is a future enhancement).
+# single long input doesn't get silently dropped/errored by the server. Callers
+# already chunk long tiddlers (ai._chunk_text); this is the final backstop per
+# embedded string (a chunk, or a whole short tiddler).
 _MAX_EMBED_CHARS = 8000
 
 # Cache misses are embedded in chunks of this size so each chunk lands in the

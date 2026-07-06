@@ -1,0 +1,16 @@
+[
+  {"question": "how do I set up the wireguard tunnel on my router", "expected": ["Wireguard VPN"]},
+  {"question": "automatic https certificates with a reverse proxy", "expected": ["Caddy Reverse Proxy"]},
+  {"question": "block ads by filtering dns queries", "expected": ["AdGuard Home"]},
+  {"question": "snapshot a zfs dataset on truenas and replicate it", "expected": ["TrueNAS ZFS Snapshots"]},
+  {"question": "declare services volumes and networks with docker compose", "expected": ["Docker Compose"]},
+  {"question": "sourdough starter hydration and dutch oven bake", "expected": ["Sourdough Bread"]},
+  {"question": "grind size for espresso versus pour over coffee", "expected": ["Coffee Brewing"]},
+  {"question": "await coroutines on the python event loop", "expected": ["Python asyncio"]},
+  {"question": "borrow checker ownership and lifetimes", "expected": ["Rust Ownership"]},
+  {"question": "marathon training pace with interval sessions", "expected": ["Running Training"]},
+  {"question": "route external http traffic to pods with an ingress", "expected": ["Kubernetes Cluster"]},
+  {"question": "prune tomato suckers and stake the vines", "expected": ["Garden Tomatoes"]},
+  {"question": "how do I focus without distraction for deep work", "expected": ["Book Notes: Deep Work"]},
+  {"question": "let the pizza dough rise overnight in the fridge", "expected": ["Pizza Dough"]}
+]
