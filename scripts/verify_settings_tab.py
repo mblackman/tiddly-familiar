@@ -57,9 +57,14 @@ async def main():
         await page.click(".tc-control-panel .tc-tab-buttons button:has-text('Settings')")
         await page.click(".tc-control-panel button:has-text('Familiar')")
         await page.wait_for_selector("input.fam-settings-input", timeout=5000)
+        # 3 core inputs (GatewayURL/APIKey/ChatNoteTemplate) + 4 advanced
+        # number inputs (RagTopK/MaxTiddlers/SearchResultCount/RelatedCount);
+        # QueryRewrite renders as a <select>, counted separately.
         n = await page.locator("input.fam-settings-input").count()
-        assert n == 3, f"expected 3 settings inputs, got {n}"
-        print("PASS control panel tab renders 3 inputs")
+        assert n == 7, f"expected 7 settings inputs, got {n}"
+        sel = await page.locator("select.fam-settings-input").count()
+        assert sel == 1, f"expected 1 settings select, got {sel}"
+        print("PASS control panel tab renders 7 inputs + query-rewrite select")
 
         # 3. Typing a new GatewayURL into the tab takes effect on the very
         # next request, no reload: the ask must hit the bogus host.

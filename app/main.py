@@ -3,6 +3,7 @@ import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import Literal, Optional
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -149,6 +150,12 @@ class ClientAskBody(BaseModel):
     # Bounds embedding-cache *misses* per request (cost control), not the
     # candidate pool — every sent note participates in ranking once cached.
     max_tiddlers: int = Field(100, ge=1, le=1000)
+    # Optional per-request overrides for server-global retrieval config. None →
+    # keep the gateway's env value (RAG_TOP_K / RAG_QUERY_REWRITE). The plugin
+    # only sends these when the user sets them in the Familiar settings, so a
+    # client that sends nothing behaves exactly as before.
+    rag_top_k: Optional[int] = Field(None, ge=1, le=50)
+    query_rewrite: Optional[bool] = None
     # Prior chat turns, oldest first. Trimmed server-side to a turn/char budget.
     history: list[ChatTurn] = Field(default_factory=list)
 
@@ -257,6 +264,18 @@ def _resolve_client_tiddlers(items: list[ClientTiddler]) -> tuple[list[dict], di
     return out, {"hits": len(refs), "misses": len(fulls)}
 
 
+def _effective_config(body: ClientAskBody) -> AppConfig:
+    """Fold a request's optional retrieval overrides onto the server config.
+    Absent (None) fields keep their env value, so a plugin that sends nothing
+    gets exactly the server defaults."""
+    overrides = {}
+    if body.rag_top_k is not None:
+        overrides["rag_top_k"] = body.rag_top_k
+    if body.query_rewrite is not None:
+        overrides["query_rewrite"] = body.query_rewrite
+    return replace(_config, **overrides) if overrides else _config
+
+
 # --- routes ---
 
 
@@ -294,7 +313,7 @@ async def client_ask(body: ClientAskBody):
         result = await service.ask_with_tiddlers(
             body.question,
             tiddlers,
-            config=_config,
+            config=_effective_config(body),
             embedder=_embedder,
             max_tiddlers=body.max_tiddlers,
             history=[t.model_dump() for t in body.history],
@@ -320,7 +339,7 @@ async def client_ask_stream(body: ClientAskBody):
         events = await service.ask_stream_with_tiddlers(
             body.question,
             tiddlers,
-            config=_config,
+            config=_effective_config(body),
             embedder=_embedder,
             max_tiddlers=body.max_tiddlers,
             history=[t.model_dump() for t in body.history],

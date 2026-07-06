@@ -17,3 +17,43 @@ The `GATEWAY_API_KEY` value from the gateway's `.env`, sent as the `X-API-Key` h
 Proposed title for notes created by ''New note'' and the ''new AI chat'' page button. Tokens: `{name}` (random adjective-noun), `{date}` (YYYY-MM-DD), `{time}` (HH:MM):
 
 <$edit-text tiddler="$:/config/mblackman/familiar/ChatNoteTemplate" tag="input" default="" placeholder="AI Chat: {name}" class="fam-settings-input"/>
+
+---
+
+!! Advanced — retrieval tuning
+
+Optional. Each control overrides a gateway default per request; leave it ''blank'' to keep the server's own setting. Changes take effect on the next request — no reload needed.
+
+!!! Notes per answer
+
+How many top-ranked notes the familiar reads before answering (gateway `RAG_TOP_K`, default 8). More notes = more context, but slower and costlier asks:
+
+<$edit-text tiddler="$:/config/mblackman/familiar/RagTopK" tag="input" type="number" default="" placeholder="server default (8)" class="fam-settings-input"/>
+
+!!! Follow-up query rewrite
+
+For chat follow-ups, rewrite the question into a standalone search query before retrieving (gateway `RAG_QUERY_REWRITE`). Improves follow-up relevance at the cost of one extra generation call per turn:
+
+<$select tiddler="$:/config/mblackman/familiar/QueryRewrite" default="" class="fam-settings-input">
+<option value="">Server default</option>
+<option value="yes">On</option>
+<option value="no">Off</option>
+</$select>
+
+!!! Embedding budget per request
+
+Max notes embedded per request (gateway `max_tiddlers`, default 100) — the cache-miss ceiling, not the candidate pool. Raising it warms a large wiki's index in fewer asks, at higher per-ask cost:
+
+<$edit-text tiddler="$:/config/mblackman/familiar/MaxTiddlers" tag="input" type="number" default="" placeholder="server default (100)" class="fam-settings-input"/>
+
+!!! Search results shown
+
+How many results the sidebar semantic search returns:
+
+<$edit-text tiddler="$:/config/mblackman/familiar/SearchResultCount" tag="input" type="number" default="" placeholder="default (10)" class="fam-settings-input"/>
+
+!!! Related notes shown
+
+How many related notes the ''Related'' tool suggests per note:
+
+<$edit-text tiddler="$:/config/mblackman/familiar/RelatedCount" tag="input" type="number" default="" placeholder="default (5)" class="fam-settings-input"/>

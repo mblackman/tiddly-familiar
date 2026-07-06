@@ -99,6 +99,41 @@
                 "type": "text/vnd.tiddlywiki",
                 "title": "$:/config/mblackman/familiar/ChatNoteTemplate"
             }
+        },
+        {
+            "file": "config/RagTopK.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/familiar/RagTopK"
+            }
+        },
+        {
+            "file": "config/QueryRewrite.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/familiar/QueryRewrite"
+            }
+        },
+        {
+            "file": "config/MaxTiddlers.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/familiar/MaxTiddlers"
+            }
+        },
+        {
+            "file": "config/SearchResultCount.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/familiar/SearchResultCount"
+            }
+        },
+        {
+            "file": "config/RelatedCount.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/config/mblackman/familiar/RelatedCount"
+            }
         }
     ]
 }

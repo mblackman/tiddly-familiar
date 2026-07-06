@@ -70,6 +70,59 @@ def test_client_ask(client, monkeypatch):
     assert data["cache"] == {"hits": 0, "misses": 1}
 
 
+def test_client_ask_overrides_config_per_request(client, monkeypatch):
+    """rag_top_k / query_rewrite in the body override the server config for that
+    request only; the shared _config is left untouched."""
+    seen = {}
+
+    async def fake_answer_question(**kw):
+        cfg = kw["cfg"]
+        seen["rag_top_k"] = cfg.rag_top_k
+        seen["query_rewrite"] = cfg.query_rewrite
+        return {"answer": "ok", "sources": [], "truncated": False}
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    resp = client.post(
+        "/ask",
+        json={
+            "question": "q",
+            "tiddlers": [ZEBRA],
+            "rag_top_k": 3,
+            "query_rewrite": False,
+        },
+        headers=AUTH,
+    )
+    assert resp.status_code == 200
+    assert seen == {"rag_top_k": 3, "query_rewrite": False}
+    # the module-global config keeps its defaults for the next request
+    assert main._config.rag_top_k == 8
+    assert main._config.query_rewrite is True
+
+
+def test_client_ask_without_overrides_uses_server_config(client, monkeypatch):
+    seen = {}
+
+    async def fake_answer_question(**kw):
+        seen["cfg"] = kw["cfg"]
+        return {"answer": "ok", "sources": [], "truncated": False}
+
+    monkeypatch.setattr(service, "answer_question", fake_answer_question)
+    resp = client.post("/ask", json={"question": "q", "tiddlers": [ZEBRA]}, headers=AUTH)
+    assert resp.status_code == 200
+    # no overrides → the very same config object, not a copy
+    assert seen["cfg"] is main._config
+
+
+def test_client_ask_override_bounds_are_validated(client):
+    for bad in (0, 51):
+        resp = client.post(
+            "/ask",
+            json={"question": "q", "tiddlers": [ZEBRA], "rag_top_k": bad},
+            headers=AUTH,
+        )
+        assert resp.status_code == 422
+
+
 def test_client_ask_cache_flow(client, monkeypatch):
     """Full send → check reports present → hash-only ref resolves from cache."""
 

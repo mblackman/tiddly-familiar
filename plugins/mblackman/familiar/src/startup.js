@@ -46,6 +46,36 @@ exports.startup = function() {
       return cfg("APIKey");
     };
 
+    // Optional retrieval knobs from Control Panel -> Settings -> Familiar. Blank
+    // (or unparseable) -> return null so the request omits the field and the
+    // gateway falls back to its own env default. Read per call, like URL/key.
+    function cfgInt(name) {
+      var raw = cfg(name);
+      if (!raw) return null;
+      var n = parseInt(raw, 10);
+      return (isFinite(n) && n > 0) ? n : null;
+    }
+    function cfgBool(name) {
+      var raw = cfg(name).toLowerCase();
+      if (raw === "yes" || raw === "true" || raw === "on" || raw === "1") return true;
+      if (raw === "no" || raw === "false" || raw === "off" || raw === "0") return false;
+      return null; // blank / unrecognised -> let the server decide
+    }
+    // /ask + /ask/stream overrides: top-k, query rewrite, embed-miss budget.
+    function applyAskOverrides(body) {
+      var topK = cfgInt("RagTopK");
+      if (topK !== null) body.rag_top_k = topK;
+      var rewrite = cfgBool("QueryRewrite");
+      if (rewrite !== null) body.query_rewrite = rewrite;
+      return applyMaxTiddlers(body);
+    }
+    // /search + /related share only the embed-miss budget knob.
+    function applyMaxTiddlers(body) {
+      var maxT = cfgInt("MaxTiddlers");
+      if (maxT !== null) body.max_tiddlers = maxT;
+      return body;
+    }
+
     // This wiki sends its own note content with every request (the gateway's
     // client-supplied-content routes), so everything works against any
     // TiddlyWiki — the gateway needs no notebook config or wiki credentials.
@@ -614,6 +644,7 @@ exports.startup = function() {
       ask: function(question, filter, history) {
         var body = {question: question};
         if (history && history.length) body.history = history;
+        applyAskOverrides(body);
         return localPayload(filter).then(function(p) {
           return localFetch("/ask", p, function(tiddlers) {
             body.tiddlers = tiddlers;
@@ -630,6 +661,7 @@ exports.startup = function() {
       askStream: function(question, filter, history, handlers) {
         var body = {question: question};
         if (history && history.length) body.history = history;
+        applyAskOverrides(body);
         return localPayload(filter).then(function(p) {
           return localFetch("/ask/stream", p, function(tiddlers) {
             body.tiddlers = tiddlers;
@@ -689,7 +721,7 @@ exports.startup = function() {
         };
         return localPayload(null).then(function(p) {
           return localFetch("/related", p, function(tiddlers) {
-            return {target: target, tiddlers: tiddlers, k: k || 5};
+            return applyMaxTiddlers({target: target, tiddlers: tiddlers, k: k || 5});
           });
         }).then(function(r) {
           if (!r.ok) return rejectWithDetail(r);
@@ -703,7 +735,7 @@ exports.startup = function() {
       search: function(query, filter, k) {
         return localPayload(filter).then(function(p) {
           return localFetch("/search", p, function(tiddlers) {
-            return {query: query, tiddlers: tiddlers, k: k || 10};
+            return applyMaxTiddlers({query: query, tiddlers: tiddlers, k: k || 10});
           }).then(function(r) {
             if (!r.ok) return rejectWithDetail(r);
             return r.json().then(function(data) { return annotateLocal(data, p); });
@@ -981,7 +1013,7 @@ exports.startup = function() {
       var stateTitle = "$:/temp/familiar/related/" + title;
       dbg("tm-related-notes fired; title=" + JSON.stringify(title));
       setState("$:/state/familiar/related-loading", title);
-      $tw.Familiar.related(title, 5).then(function(data) {
+      $tw.Familiar.related(title, cfgInt("RelatedCount") || 5).then(function(data) {
         var items = (data.related || []).map(function(r) { return "* [[" + r.title + "]]"; }).join("\n");
         if (!items) {
           items = "//No related notes found" + (data.truncated ? " yet — the index is still warming, try again//" : ".//");
@@ -1012,7 +1044,7 @@ exports.startup = function() {
       clearSearchResults();
       setState("$:/state/familiar/searching", "yes");
       setState("$:/state/familiar/search-results", "");
-      $tw.Familiar.search(query, filter, 10).then(function(data) {
+      $tw.Familiar.search(query, filter, cfgInt("SearchResultCount") || 10).then(function(data) {
         var results = data.results || [];
         // Each result is its own tiddler; the panel renders them with a $list
         // widget (repeating one parsed template — a transcluded string of many

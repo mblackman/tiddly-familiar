@@ -11,6 +11,17 @@ Open //Control Panel → Settings → Familiar// (or edit the tiddlers below dir
 |`$:/config/mblackman/familiar/APIKey` |`GATEWAY_API_KEY` from your `.env` |(empty) |
 |`$:/config/mblackman/familiar/ChatNoteTemplate` |Title template for ''New note'' chats — tokens: `{name}` (random adjective-noun), `{date}` (YYYY-MM-DD), `{time}` (HH:MM) |`AI Chat: {name}` |
 
+!!! Advanced — retrieval tuning
+
+Optional per-request overrides (Control Panel → Settings → Familiar). Leave a tiddler ''blank'' to use the gateway's own setting; changes apply to the next request.
+
+|!Tiddler |!Purpose |!Blank = |
+|`$:/config/mblackman/familiar/RagTopK` |Top-ranked notes fed to each answer (gateway `RAG_TOP_K`) |server default (8) |
+|`$:/config/mblackman/familiar/QueryRewrite` |Rewrite chat follow-ups into a standalone search query before retrieving (`yes`/`no`) |server default (`RAG_QUERY_REWRITE`) |
+|`$:/config/mblackman/familiar/MaxTiddlers` |Notes embedded per request — the cache-miss ceiling, not the candidate pool (gateway `max_tiddlers`) |server default (100) |
+|`$:/config/mblackman/familiar/SearchResultCount` |Results returned by sidebar semantic search |10 |
+|`$:/config/mblackman/familiar/RelatedCount` |Related notes suggested per note |5 |
+
 Upgrading from the pre-rename //AI Gateway// plugin? Your settings are migrated automatically on first startup — just uninstall the old `$:/plugins/mblackman/ai-gateway` plugin.
 
 !! How it works
