@@ -1,0 +1,152 @@
+\whitespace trim
+<$list filter="[<currentTiddler>!has[draft.of]!is[missing]]" variable="ignore-note">
+<div class="fam-info">
+
+<!-- ===== AI Summary ===== -->
+<div class="fam-info-section">
+<$reveal state="$:/state/familiar/summarizing" type="match" text=<<currentTiddler>>>
+<div class="fam-related-loading"><span class="fam-spinner"></span> Summarizing…</div>
+</$reveal>
+<$reveal state="$:/state/familiar/summarizing" type="nomatch" text=<<currentTiddler>>>
+<$list filter="[<currentTiddler>!has[summary]]" variable="ignore-nosum">
+<$button class="tc-btn-invisible fam-related-btn" tooltip="Summarize this note via the AI gateway">
+<$action-sendmessage $message="tm-summarize-tiddler" $param=<<currentTiddler>>/>
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Summarize note
+</$button>
+</$list>
+<$list filter="[<currentTiddler>has[summary]]" variable="ignore-sum">
+<div class="fam-related-box">
+<div class="fam-related-head">
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>AI Summary
+<$button class="tc-btn-invisible fam-related-refresh" tooltip="Re-summarize this note">
+<$action-sendmessage $message="tm-summarize-tiddler" $param=<<currentTiddler>>/>↻
+</$button>
+<$button class="tc-btn-invisible fam-related-clear" tooltip="Clear summary">
+<$action-deletefield $tiddler=<<currentTiddler>> $field="summary"/>×
+</$button>
+</div>
+<$transclude field="summary" mode="block"/>
+<div class="fam-info-actions">
+<$button class="fam-preset" tooltip="Write this summary as an editable block at the top of the note body">
+<$action-sendmessage $message="tm-insert-summary" $param=<<currentTiddler>>/>
+Insert into note
+</$button>
+</div>
+</div>
+</$list>
+</$reveal>
+</div>
+
+<!-- ===== Related notes ===== -->
+<$set name="relatedState" value={{{ [[$:/temp/familiar/related/]addsuffix<currentTiddler>] }}}>
+<div class="fam-info-section">
+<$reveal state="$:/state/familiar/related-loading" type="match" text=<<currentTiddler>>>
+<span class="fam-related-loading"><span class="fam-spinner"></span> Finding related notes…</span>
+</$reveal>
+<$reveal state="$:/state/familiar/related-loading" type="nomatch" text=<<currentTiddler>>>
+<$list filter="[<relatedState>is[missing]]" variable="ignore-missing">
+<$button class="tc-btn-invisible fam-related-btn" tooltip="Find related notes via the AI gateway">
+<$action-sendmessage $message="tm-related-notes" $param=<<currentTiddler>>/>
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Related notes
+</$button>
+</$list>
+<$list filter="[<relatedState>!is[missing]]" variable="ignore-present">
+<div class="fam-related-box">
+<div class="fam-related-head">
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Related notes
+<$button class="tc-btn-invisible fam-related-refresh" tooltip="Refresh related notes">
+<$action-sendmessage $message="tm-related-notes" $param=<<currentTiddler>>/>↻
+</$button>
+<$button class="tc-btn-invisible fam-related-clear" tooltip="Hide related notes">
+<$action-deletetiddler $filter="[<relatedState>]"/>×
+</$button>
+</div>
+<$transclude tiddler=<<relatedState>> mode="block"/>
+</div>
+</$list>
+</$reveal>
+</div>
+</$set>
+
+<!-- ===== Suggested tags ===== -->
+<$set name="tagsState" value={{{ [[$:/temp/familiar/tags/]addsuffix<currentTiddler>] }}}>
+<div class="fam-info-section">
+<$reveal state="$:/state/familiar/tags-loading" type="match" text=<<currentTiddler>>>
+<span class="fam-related-loading"><span class="fam-spinner"></span> Suggesting tags…</span>
+</$reveal>
+<$reveal state="$:/state/familiar/tags-loading" type="nomatch" text=<<currentTiddler>>>
+<$list filter="[<tagsState>is[missing]]" variable="ignore-missing">
+<$button class="tc-btn-invisible fam-related-btn" tooltip="Suggest tags for this note via the AI gateway">
+<$action-sendmessage $message="tm-suggest-tags" $param=<<currentTiddler>>/>
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Suggest tags
+</$button>
+</$list>
+<$list filter="[<tagsState>!is[missing]]" variable="ignore-present">
+<div class="fam-related-box">
+<div class="fam-related-head">
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Suggested tags
+<$button class="tc-btn-invisible fam-related-refresh" tooltip="Refresh suggestions">
+<$action-sendmessage $message="tm-suggest-tags" $param=<<currentTiddler>>/>↻
+</$button>
+<$button class="tc-btn-invisible fam-related-clear" tooltip="Hide suggestions">
+<$action-deletetiddler $filter="[<tagsState>]"/>×
+</$button>
+</div>
+<$list filter="[<tagsState>has[error]]" variable="ignore-error">
+//<$view tiddler=<<tagsState>> field="error"/>//
+</$list>
+<$list filter="[<tagsState>!has[error]]" variable="ignore-ok">
+<$list filter="[<tagsState>get[text]enlist-input[]] -[<currentTiddler>tags[]]" variable="suggestedTag" emptyMessage="//Nothing new to suggest.//">
+<$button class="fam-tag-suggestion" tooltip="Add this tag to the note">
+<$action-listops $tiddler=<<currentTiddler>> $tags="[all[current]tags[]] [<suggestedTag>]"/>
++ <<suggestedTag>>
+</$button>
+</$list>
+</$list>
+</div>
+</$list>
+</$reveal>
+</div>
+</$set>
+
+<!-- ===== Tasks ===== -->
+<$set name="tasksState" value={{{ [[$:/temp/familiar/tasks/]addsuffix<currentTiddler>] }}}>
+<div class="fam-info-section">
+<$reveal state="$:/state/familiar/tasks-loading" type="match" text=<<currentTiddler>>>
+<span class="fam-related-loading"><span class="fam-spinner"></span> Extracting tasks…</span>
+</$reveal>
+<$reveal state="$:/state/familiar/tasks-loading" type="nomatch" text=<<currentTiddler>>>
+<$list filter="[<tasksState>is[missing]]" variable="ignore-missing">
+<$button class="tc-btn-invisible fam-related-btn" tooltip="Extract action items from this note via the AI gateway">
+<$action-sendmessage $message="tm-extract-tasks" $param=<<currentTiddler>>/>
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Extract tasks
+</$button>
+</$list>
+<$list filter="[<tasksState>!is[missing]]" variable="ignore-present">
+<div class="fam-related-box">
+<div class="fam-related-head">
+<svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2L13.5 10.5L22 12L13.5 13.5L12 22L10.5 13.5L2 12L10.5 10.5Z"/></svg>Tasks
+<$button class="tc-btn-invisible fam-related-refresh" tooltip="Refresh tasks">
+<$action-sendmessage $message="tm-extract-tasks" $param=<<currentTiddler>>/>↻
+</$button>
+<$button class="tc-btn-invisible fam-related-clear" tooltip="Hide tasks">
+<$action-deletetiddler $filter="[<tasksState>]"/>×
+</$button>
+</div>
+<$transclude tiddler=<<tasksState>> mode="block"/>
+<$list filter="[<tasksState>get[text]!match[(no tasks found)]]" variable="ignore-hastasks">
+<div class="fam-info-actions">
+<$button class="fam-preset" tooltip="Append these tasks as an editable list at the end of the note body">
+<$action-sendmessage $message="tm-insert-tasks" $param=<<currentTiddler>>/>
+Insert into note
+</$button>
+</div>
+</$list>
+</div>
+</$list>
+</$reveal>
+</div>
+</$set>
+
+</div>
+</$list>

@@ -1028,6 +1028,67 @@ exports.startup = function() {
       });
     });
 
+    // --- "Insert into note": materialise AI output as editable note body ---
+    // The info-dropdown tab previews summary/tasks; these handlers write them
+    // into the note text as real wikitext (or Markdown, matching the note's
+    // own type) that the user then owns and edits. Idempotent-ish: a second
+    // insert is skipped when the same content is already present in the body.
+
+    function noteIsMarkdown(t) {
+      var ty = String((t.fields && t.fields.type) || "").toLowerCase();
+      return ty === "text/markdown" || ty === "text/x-markdown";
+    }
+
+    // Replace the note's text field, bumping modified so the syncer flushes it.
+    function setNoteText(t, newText) {
+      $tw.wiki.addTiddler(new $tw.Tiddler(
+        t, {text: newText}, $tw.wiki.getModificationFields()));
+    }
+
+    $tw.rootWidget.addEventListener("tm-insert-summary", function(event) {
+      var title = event.param || "";
+      if (!title) return;
+      var t = $tw.wiki.getTiddler(title);
+      if (!t) return;
+      var summary = String(t.fields.summary || "").trim();
+      if (!summary) return;
+      var body = String(t.fields.text || "");
+      if (body.indexOf(summary) !== -1) {
+        dbg("insert-summary skipped; already in body: " + JSON.stringify(title));
+        return;
+      }
+      var block = noteIsMarkdown(t)
+        ? "> **AI summary:** " + summary.replace(/\n/g, "\n> ")
+        : "<<<.tc-quote\n''AI summary''\n\n" + summary + "\n<<<";
+      setNoteText(t, block + (body ? "\n\n" + body : "\n"));
+      dbg("inserted summary into " + JSON.stringify(title));
+    });
+
+    $tw.rootWidget.addEventListener("tm-insert-tasks", function(event) {
+      var title = event.param || "";
+      if (!title) return;
+      var t = $tw.wiki.getTiddler(title);
+      if (!t) return;
+      var tasks = String(
+        $tw.wiki.getTiddlerText("$:/temp/familiar/tasks/" + title) || "").trim();
+      if (!tasks || tasks === "(no tasks found)") return;
+      // Normalise the gateway's Markdown bullets to the note's own list syntax.
+      var md = noteIsMarkdown(t);
+      var bullet = md ? "- " : "* ";
+      var items = tasks.split("\n").map(function(line) {
+        var m = line.match(/^\s*(?:[-*+]|\d+[.)])\s+(.*)$/);
+        return m ? bullet + m[1] : line;
+      }).join("\n");
+      var block = (md ? "## Tasks" : "!! Tasks") + "\n\n" + items;
+      var body = String(t.fields.text || "");
+      if (body.indexOf(items) !== -1) {
+        dbg("insert-tasks skipped; already in body: " + JSON.stringify(title));
+        return;
+      }
+      setNoteText(t, (body ? body.replace(/\s*$/, "") + "\n\n" : "") + block + "\n");
+      dbg("inserted tasks into " + JSON.stringify(title));
+    });
+
     // Sidebar semantic search: rank the notes (optionally filtered) by the
     // query and render a scored, snippeted list — no generation. Shares the
     // composer's question/filter state with ask; the panel's mode toggle

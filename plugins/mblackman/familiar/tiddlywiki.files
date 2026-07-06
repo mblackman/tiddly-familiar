@@ -63,6 +63,16 @@
             }
         },
         {
+            "file": "ui/InfoPanel.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/plugins/mblackman/familiar/ui/InfoPanel",
+                "caption": "Familiar",
+                "tags": "$:/tags/TiddlerInfo",
+                "list-after": "$:/core/ui/TiddlerInfo/Tools"
+            }
+        },
+        {
             "file": "ui/Settings.tid",
             "fields": {
                 "type": "text/vnd.tiddlywiki",
