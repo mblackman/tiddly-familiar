@@ -267,3 +267,25 @@ def test_run_command_tags_includes_vocabulary(monkeypatch):
         run_command("tags", "T", "text", FakeConfig(), vocabulary=["alpha", "beta"])
     )
     assert "alpha, beta" in seen["prompt"]
+
+
+def test_run_command_digest_summarizes_transcript(monkeypatch):
+    """The digest command distils a chat transcript into plain prose for the
+    conversation note body (retrieval fodder for future asks)."""
+    seen = {}
+
+    async def fake_generate_text(system, prompt, cfg, history=None):
+        seen["system"] = system
+        seen["prompt"] = prompt
+        return "Discussed Caddy; it listens on :443."
+
+    monkeypatch.setattr(ai, "_generate_text", fake_generate_text)
+    transcript = "User: What is Caddy?\n\nAssistant: A reverse proxy on :443."
+    result = asyncio.run(
+        run_command("digest", "AI Chat: Caddy", transcript, FakeConfig())
+    )
+    assert result == "Discussed Caddy; it listens on :443."
+    assert "AI Chat: Caddy" in seen["prompt"]
+    assert transcript in seen["prompt"]
+    # digest output is plain prose, so the system prompt forbids Markdown/headings
+    assert "no Markdown" in seen["system"] or "no headings" in seen["system"]

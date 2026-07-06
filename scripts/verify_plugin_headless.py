@@ -175,7 +175,7 @@ async def main():
         )
         assert temp_left == 0, f"{temp_left} temp turns left after save"
         saved = await page.evaluate(
-            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]sort[title]]')"
+            "(n) => $tw.wiki.filterTiddlers('[prefix[$:/familiar/chat/' + n + '/turn/]sort[title]]')"
             ".map(t => { var f = $tw.wiki.getTiddler(t).fields; "
             "return {role: f.role, tags: (f.tags||[]).join(' ')}; })",
             note,
@@ -186,6 +186,36 @@ async def main():
             "(n) => ($tw.wiki.getTiddler(n).fields.tags || []).join(' ')", note
         )
         assert "ai-chat" in note_tags, "chat note not tagged ai-chat"
+        # the whole point: turns are system tiddlers (persist, but stay out of
+        # the note feed), while the conversation note itself is a normal note.
+        leaked = await page.evaluate(
+            "() => $tw.wiki.filterTiddlers('[!is[system]tag[ai-chat-turn]]')"
+        )
+        assert leaked == [], f"chat turns leak into the note feed (Recent): {leaked}"
+        note_in_feed = await page.evaluate(
+            "(n) => $tw.wiki.filterTiddlers('[!is[system]tag[ai-chat]]').indexOf(n) !== -1", note
+        )
+        assert note_in_feed, "chat note should surface in the non-system note feed"
+
+        # --- digest: the saved conversation distils into the note body so it
+        # becomes retrievable in future asks (debounced ~4s + a generate call) ---
+        digest = ""
+        for _ in range(40):
+            await asyncio.sleep(0.5)
+            digest = await get_text(page, note)  # the note's own body text
+            if digest.strip():
+                break
+        marker = await page.evaluate(
+            "(n) => $tw.wiki.getTiddler(n).fields['digest-turns'] || ''", note
+        )
+        print("note digest body:", repr(digest[:160]), "| digest-turns:", marker)
+        assert digest.strip(), "conversation note body was never digested"
+        assert marker == "4", f"digest-turns marker should be 4, got {marker!r}"
+        # a digested note is real retrieval material: non-system, non-empty body
+        retrievable = await page.evaluate(
+            "(n) => $tw.wiki.filterTiddlers('[!is[system]has[text]]').indexOf(n) !== -1", note
+        )
+        assert retrievable, "digested chat note should be a retrieval candidate"
 
         # --- next turn lands in the note while bound ---
         await set_tiddler(page, "$:/state/familiar/question", "Summarize that in one sentence.")
@@ -195,7 +225,7 @@ async def main():
             if await get_text(page, "$:/state/familiar/asking") == "no":
                 break
         counts = await page.evaluate(
-            "(n) => [$tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]]').length,"
+            "(n) => [$tw.wiki.filterTiddlers('[prefix[$:/familiar/chat/' + n + '/turn/]]').length,"
             " $tw.wiki.filterTiddlers('[prefix[$:/temp/familiar/chat/]]').length]",
             note,
         )
@@ -208,7 +238,7 @@ async def main():
         await wait_ready(page)
         await asyncio.sleep(2)
         persisted = await page.evaluate(
-            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]sort[title]]')"
+            "(n) => $tw.wiki.filterTiddlers('[prefix[$:/familiar/chat/' + n + '/turn/]sort[title]]')"
             ".map(t => $tw.wiki.getTiddler(t).fields.role)",
             note,
         )
@@ -230,7 +260,7 @@ async def main():
             if await get_text(page, "$:/state/familiar/note-asking/" + note) == "no":
                 break
         in_note = await page.evaluate(
-            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]sort[title]]')"
+            "(n) => $tw.wiki.filterTiddlers('[prefix[$:/familiar/chat/' + n + '/turn/]sort[title]]')"
             ".map(t => $tw.wiki.getTiddler(t).fields.role)",
             note,
         )
@@ -242,7 +272,7 @@ async def main():
 
         # Remove the (real, synced) chat note + turns so reruns start clean.
         await page.evaluate(
-            "(n) => $tw.wiki.filterTiddlers('[prefix[' + n + '/turn/]] [[' + n + ']]')"
+            "(n) => $tw.wiki.filterTiddlers('[prefix[$:/familiar/chat/' + n + '/turn/]] [[' + n + ']]')"
             ".forEach(t => $tw.wiki.deleteTiddler(t))",
             note,
         )

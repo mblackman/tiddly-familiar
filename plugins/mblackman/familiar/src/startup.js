@@ -86,6 +86,10 @@ exports.startup = function() {
     var LOCAL_MAX_TOTAL = 2000000;
 
     var CHAT_PREFIX = "$:/temp/familiar/chat/";
+    // Saved chat turns live under this system prefix (keyed by note title) so
+    // they persist via the wiki saver but stay out of Recent/search and the
+    // gateway RAG push — only the conversation note itself reads as a note.
+    var SAVED_CHAT_PREFIX = "$:/familiar/chat/";
     var SEARCH_RESULT_PREFIX = "$:/temp/familiar/search/result/";
     var CHAT_NOTE_STATE = "$:/state/familiar/chat-note";
     var NEW_TITLE_STATE = "$:/state/familiar/new-chat-title";
@@ -95,6 +99,23 @@ exports.startup = function() {
     var CHAT_TURN_TAG = "ai-chat-turn";
     var MAX_TURNS = 10;
     var FLUSH_MS = 120; // throttle transcript re-renders while streaming
+
+    // One-time migration (plugin <=0.12.0): saved chat turns used to be stored
+    // as ordinary tiddlers ("<note>/turn/NNNNNN") that showed up in Recent and
+    // got pushed to the gateway RAG index. Move any legacy turns under the
+    // system SAVED_CHAT_PREFIX so they persist but stay out of the note feed.
+    // (Titles already stray under "$:/" — temp/new turns — are left alone.)
+    function migrateChatTurns() {
+      $tw.wiki.filterTiddlers("[tag[" + CHAT_TURN_TAG + "]!prefix[$:/]]")
+        .forEach(function(oldTitle) {
+          var newTitle = SAVED_CHAT_PREFIX + oldTitle;
+          if ($tw.wiki.tiddlerExists(newTitle)) return;
+          var tid = $tw.wiki.getTiddler(oldTitle);
+          $tw.wiki.addTiddler(new $tw.Tiddler(tid.fields, {title: newTitle}));
+          $tw.wiki.deleteTiddler(oldTitle);
+        });
+    }
+    migrateChatTurns();
 
     function headers() {
       var h = {"Content-Type": "application/json"};
@@ -124,18 +145,26 @@ exports.startup = function() {
 
     // --- chat transcript: one tiddler per turn ---
     // Unsaved chats live under the volatile CHAT_PREFIX ($:/temp/ is never
-    // synced). "Save chat" moves the turns under a real note ("<note>/turn/")
-    // and binds the panel to it via CHAT_NOTE_STATE, so every later turn is
-    // written as a synced tiddler too.
+    // synced). "Save chat" creates a real note (tagged CHAT_TAG, shown in
+    // Recent) and stores its turns under the system SAVED_CHAT_PREFIX keyed by
+    // the note title. System turns persist via the wiki saver but are hidden
+    // from Recent/search ([!is[system]]) and skipped by the gateway RAG push,
+    // so only the conversation note surfaces as a note. CHAT_NOTE_STATE binds
+    // the panel to the note.
 
     function boundChatNote() {
       var title = ($tw.wiki.getTiddlerText(CHAT_NOTE_STATE) || "").trim();
       return title && $tw.wiki.tiddlerExists(title) ? title : null;
     }
 
+    // Where a note's turns live: system prefix for a saved note, the volatile
+    // temp prefix for an unbound (unsaved) sidebar transcript.
+    function turnPrefixFor(note) {
+      return note ? SAVED_CHAT_PREFIX + note + "/turn/" : CHAT_PREFIX;
+    }
+
     function chatPrefix() {
-      var note = boundChatNote();
-      return note ? note + "/turn/" : CHAT_PREFIX;
+      return turnPrefixFor(boundChatNote());
     }
 
     function padTurn(n) {
@@ -170,7 +199,7 @@ exports.startup = function() {
 
     function appendTurn(role, content, sources, note) {
       if (note === undefined) note = boundChatNote();
-      var prefix = note ? note + "/turn/" : CHAT_PREFIX;
+      var prefix = turnPrefixFor(note);
       var titles = chatTurnTitles(prefix);
       var last = titles.length
         ? parseInt(titles[titles.length - 1].slice(prefix.length), 10) : 0;
@@ -183,6 +212,8 @@ exports.startup = function() {
         // bump the note itself so the conversation surfaces in "Recent"
         $tw.wiki.addTiddler(new $tw.Tiddler(
           $tw.wiki.getTiddler(note), $tw.wiki.getModificationFields()));
+        // a completed exchange updates the note's searchable digest
+        if (role === "assistant") scheduleDigest(note);
         return;
       }
       $tw.wiki.addTiddler(new $tw.Tiddler(fields));
@@ -190,6 +221,59 @@ exports.startup = function() {
       while (titles.length > MAX_TURNS) {
         $tw.wiki.deleteTiddler(titles.shift());
       }
+    }
+
+    // --- conversation digest: distil a saved chat into its note body so past
+    // conversations resurface in future retrieval. The turns stay hidden
+    // system tiddlers; the note (already in Recent) gains a short plain-prose
+    // summary as its searchable content. Best-effort — a failed digest never
+    // touches the chat. The "digest-turns" field records how many turns the
+    // current digest reflects, so we skip regenerating when nothing changed.
+    var DIGEST_DEBOUNCE_MS = 4000;
+    var digestTimers = {};
+
+    function scheduleDigest(note) {
+      if (!note) return;
+      if (digestTimers[note]) clearTimeout(digestTimers[note]);
+      digestTimers[note] = setTimeout(function() {
+        delete digestTimers[note];
+        refreshDigest(note);
+      }, DIGEST_DEBOUNCE_MS);
+    }
+
+    function refreshDigest(note) {
+      if (!$tw.wiki.tiddlerExists(note)) return;
+      var titles = chatTurnTitles(turnPrefixFor(note));
+      if (!titles.length) return;
+      var noteTid = $tw.wiki.getTiddler(note);
+      var mark = noteTid.fields["digest-turns"];
+      // never clobber a body the user wrote themselves (non-empty, no digest
+      // marker); once we've written one digest we own the body and refresh it.
+      if (String(noteTid.fields.text || "").trim() && !mark) return;
+      if (parseInt(mark || "0", 10) === titles.length) return;
+      var transcript = titles.map(function(t) {
+        var f = $tw.wiki.getTiddler(t).fields;
+        return (f.role === "assistant" ? "Assistant: " : "User: ") +
+          String(f.text || "").trim();
+      }).join("\n\n").slice(0, LOCAL_MAX_TEXT);
+      // Prefer the transcript-tuned "digest" command; an older gateway that
+      // doesn't know it (400 Unknown command) falls back to plain "summarize".
+      $tw.Familiar.generateText(note, "digest", transcript).catch(function(err) {
+        if (/[Uu]nknown command/.test(err.message)) {
+          return $tw.Familiar.generateText(note, "summarize", transcript);
+        }
+        throw err;
+      }).then(function(data) {
+        var summary = ((data && data.result) || "").trim();
+        var cur = $tw.wiki.getTiddler(note);
+        if (!summary || !cur) return;
+        $tw.wiki.addTiddler(new $tw.Tiddler(cur, {
+          text: summary, "digest-turns": String(titles.length)
+        }, $tw.wiki.getModificationFields()));
+        dbg("digest updated for " + JSON.stringify(note) + " (" + titles.length + " turns)");
+      }).catch(function(err) {
+        dbg("digest failed for " + JSON.stringify(note) + " (" + err.message + ") - non-fatal");
+      });
     }
 
     // keep titles filter-safe: they are spliced into [prefix[...]] runs
@@ -693,7 +777,12 @@ exports.startup = function() {
         var text = "";
         try { text = ($tw.wiki.renderTiddler("text/plain", title) || "").trim(); } catch (e) {}
         if (!text) text = String(t.fields.text || "").trim();
-        var body = {title: title, command: command, text: text.slice(0, LOCAL_MAX_TEXT)};
+        return this.generateText(title, command, text);
+      },
+      // Same /generate call, but over already-assembled text (e.g. a chat
+      // transcript) instead of a single tiddler's rendered body.
+      generateText: function(title, command, text) {
+        var body = {title: title, command: command, text: String(text || "").slice(0, LOCAL_MAX_TEXT)};
         if (command === "tags") {
           body.vocabulary = $tw.wiki.filterTiddlers("[tags[]]");
         }
@@ -848,7 +937,7 @@ exports.startup = function() {
     // In-note chat: any tiddler tagged ai-chat renders its transcript plus a
     // composer (ViewTemplate). Question/asking/answer state is per note, so
     // several note chats and the sidebar can stream independently; turns are
-    // recorded under "<note>/turn/NNNNNN" like any saved chat.
+    // recorded under the note's system turn prefix like any saved chat.
     $tw.rootWidget.addEventListener("tm-ask-ai-note", function(event) {
       var note = event.param || "";
       if (!note || !$tw.wiki.tiddlerExists(note)) return;
@@ -859,7 +948,7 @@ exports.startup = function() {
       var question = ($tw.wiki.getTiddlerText(qState) || "").trim();
       dbg("tm-ask-ai-note fired; note=" + JSON.stringify(note) + " question=" + JSON.stringify(question));
       if (!question) return;
-      var history = chatHistoryFor(note + "/turn/");
+      var history = chatHistoryFor(turnPrefixFor(note));
       appendTurn("user", question, null, note);
       setState(qState, "");
       setState(askingState, "yes");
@@ -874,8 +963,8 @@ exports.startup = function() {
     });
 
     // Persist the current temp transcript as a real note tagged CHAT_TAG:
-    // turns move to "<note>/turn/NNNNNN" (synced tiddlers) and the panel
-    // binds to the note so the rest of the conversation persists too.
+    // turns move under the note's system turn prefix (persisted, but hidden
+    // from Recent) and the panel binds to the note so later turns land there.
     $tw.rootWidget.addEventListener("tm-save-chat", function() {
       if (boundChatNote()) return; // already persisting into a note
       var titles = chatTurnTitles(CHAT_PREFIX);
@@ -899,12 +988,13 @@ exports.startup = function() {
         var tid = $tw.wiki.getTiddler(t);
         $tw.wiki.addTiddler(new $tw.Tiddler(
           $tw.wiki.getCreationFields(), tid.fields, {
-            title: noteTitle + "/turn/" + padTurn(i + 1),
+            title: turnPrefixFor(noteTitle) + padTurn(i + 1),
             tags: [CHAT_TURN_TAG]
           }, $tw.wiki.getModificationFields()));
         $tw.wiki.deleteTiddler(t);
       });
       setState(CHAT_NOTE_STATE, noteTitle);
+      scheduleDigest(noteTitle);
       dbg("chat saved to " + JSON.stringify(noteTitle) + " (" + titles.length + " turns)");
     });
 

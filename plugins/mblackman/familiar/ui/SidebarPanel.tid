@@ -115,7 +115,7 @@ Create
 </$reveal>
 <$reveal state="$:/state/familiar/chat-note" type="nomatch" text="" tag="div">
 <div class="fam-chat">
-<$macrocall $name="fam-transcript" prefix={{{ [{$:/state/familiar/chat-note}addsuffix[/turn/]] }}}/>
+<$macrocall $name="fam-transcript" prefix={{{ [[$:/familiar/chat/]addsuffix{$:/state/familiar/chat-note}addsuffix[/turn/]] }}}/>
 </div>
 </$reveal>
 

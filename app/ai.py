@@ -711,6 +711,19 @@ _COMMANDS: dict[str, dict] = {
         ),
         "prompt": "Extract the action items from the following note.\n\n# {title}\n\n{text}",
     },
+    # Distils a saved chat transcript into a retrieval-friendly note body so
+    # past conversations resurface in future asks. Plain prose (renders fine as
+    # wikitext in any wiki), factual, no structure — this is search fodder.
+    "digest": {
+        "system": (
+            "You write a compact digest of a chat conversation from a personal "
+            "TiddlyWiki notebook so it can be found and reused later. Reply with "
+            "2-4 plain sentences capturing what was asked and the key "
+            "conclusions or facts. No preamble, no headings, no bullet lists, "
+            "no Markdown."
+        ),
+        "prompt": "Digest the following conversation.\n\n# {title}\n\n{text}",
+    },
 }
 
 COMMANDS = frozenset(_COMMANDS)
