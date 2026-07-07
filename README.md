@@ -103,4 +103,4 @@ notes how many notes were searched.
 
 ## License
 
-See repository for license details.
+MIT — see [LICENSE](LICENSE).

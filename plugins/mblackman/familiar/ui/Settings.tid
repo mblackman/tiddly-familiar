@@ -58,6 +58,15 @@ How many related notes the ''Related'' tool suggests per note:
 
 <$edit-text tiddler="$:/config/mblackman/familiar/RelatedCount" tag="input" type="number" default="" placeholder="default (5)" class="fam-settings-input"/>
 
+!!! Reset
+
+Restore the five tuning knobs above to the gateway's own defaults. This clears your overrides only — the gateway URL, API key, and title-template settings are left untouched:
+
+<$button class="fam-settings-input">
+<$action-deletetiddler $filter="[prefix[$:/config/mblackman/familiar/]] -[[$:/config/mblackman/familiar/GatewayURL]] -[[$:/config/mblackman/familiar/APIKey]] -[[$:/config/mblackman/familiar/ChatNoteTemplate]]"/>
+Reset retrieval settings to defaults
+</$button>
+
 ---
 
 !! Sync status

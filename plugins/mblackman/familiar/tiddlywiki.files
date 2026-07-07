@@ -17,6 +17,14 @@
             }
         },
         {
+            "file": "License.tid",
+            "fields": {
+                "type": "text/vnd.tiddlywiki",
+                "title": "$:/plugins/mblackman/familiar/License",
+                "caption": "License"
+            }
+        },
+        {
             "file": "icon.svg",
             "fields": {
                 "type": "image/svg+xml",
