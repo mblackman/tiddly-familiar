@@ -79,9 +79,14 @@ exports.startup = function() {
     // This wiki sends its own note content with every request (the gateway's
     // client-supplied-content routes), so everything works against any
     // TiddlyWiki — the gateway needs no notebook config or wiki credentials.
-    // Budgets mirrored from the gateway (MAX_CLIENT_TIDDLERS etc. in main.py):
-    // enforce here by dropping overflow so requests never 422.
-    var LOCAL_MAX_TIDDLERS = 500;
+    // Budgets mirrored from the gateway (MAX_CANDIDATE_TIDDLERS etc. in
+    // main.py): enforce here by dropping overflow so requests never 422.
+    //
+    // The candidate set for a request is mostly bare {hash} refs (cheap), so
+    // the whole synced corpus rides along and the gateway ranks over all of it,
+    // not just a slice. Only full {title,text} content is tightly bounded.
+    var LOCAL_MAX_CANDIDATES = 20000; // notes referenced per request (refs + fulls)
+    var LOCAL_MAX_FULL = 500;         // full-content notes sent per request
     var LOCAL_MAX_TEXT = 50000;
     var LOCAL_MAX_TOTAL = 2000000;
 
@@ -738,7 +743,7 @@ exports.startup = function() {
       var titles = $tw.wiki.filterTiddlers((filter || "").trim() || "[!is[system]]");
       var total = titles.length;
       var notes = [];
-      titles.slice(0, LOCAL_MAX_TIDDLERS).forEach(function(title) {
+      titles.slice(0, LOCAL_MAX_CANDIDATES).forEach(function(title) {
         var e = syncState[title];
         if (!e) { // not scanned yet (mid-startup) or a system tiddler
           var n = readNote(title);
@@ -748,10 +753,14 @@ exports.startup = function() {
         notes.push({title: title, hash: e.hash});
       });
       var mustSend = {};
-      var payload = {tiddlers: [], total: total, capped: total > LOCAL_MAX_TIDDLERS};
+      var payload = {tiddlers: [], total: total, capped: total > LOCAL_MAX_CANDIDATES};
 
+      // Synced notes travel as bare {hash} refs (unbounded up to the candidate
+      // cap). Only notes the server lacks are sent as full content, bounded by
+      // count and total chars — overflow is dropped and self-heals once the
+      // background sync caches it, so it comes back as a free ref next time.
       function build() {
-        var out = [], budget = 0;
+        var out = [], budget = 0, fulls = 0;
         notes.forEach(function(n) {
           if (!mustSend[n.hash]) {
             out.push({hash: n.hash});
@@ -759,10 +768,11 @@ exports.startup = function() {
           }
           var full = readNote(n.title);
           if (!full) return;
-          if (budget + full.text.length > LOCAL_MAX_TOTAL) {
+          if (fulls >= LOCAL_MAX_FULL || budget + full.text.length > LOCAL_MAX_TOTAL) {
             payload.capped = true; // over budget: drop, self-heals once others cache
             return;
           }
+          fulls++;
           budget += full.text.length;
           out.push({title: full.title, text: full.text, fields: full.fields});
         });

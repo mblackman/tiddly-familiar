@@ -102,7 +102,14 @@ def _sse_response(events) -> StreamingResponse:
 # Server-side budgets for content sent in request bodies. The plugin enforces
 # the same limits (dropping overflow), so the 422s here are backstops for
 # misbehaving clients, not paths a healthy plugin ever hits.
-MAX_CLIENT_TIDDLERS = 500
+#
+# A request's candidate set is mostly bare {hash} refs into the note cache —
+# those are cheap, so the whole (synced) corpus can ride along as candidates and
+# ranking covers everything, not just a 500-note slice. Only content-bearing
+# tiddlers (full {title,text}) are bounded: they're stored, resolved, and (for
+# ask) fed to the generation model.
+MAX_CANDIDATE_TIDDLERS = 20_000  # total notes referenced per request (refs + fulls)
+MAX_FULL_TIDDLERS = 500  # content-bearing tiddlers per request (stored/generated)
 MAX_TIDDLER_TEXT = 50_000
 MAX_TOTAL_CHARS = 2_000_000
 
@@ -136,8 +143,14 @@ class ClientTiddler(BaseModel):
         return self
 
 
-def _check_total_budget(tiddlers: list[ClientTiddler]) -> None:
-    total = sum(len(t.text) for t in tiddlers if t.title is not None)
+def _check_content_budget(tiddlers: list[ClientTiddler]) -> None:
+    """Bound the content-bearing (full) tiddlers in a request. Bare {hash} refs
+    are free — they resolve from the cache — so the candidate set can be large;
+    only fulls are counted, capped by number and total chars."""
+    fulls = [t for t in tiddlers if t.title is not None]
+    if len(fulls) > MAX_FULL_TIDDLERS:
+        raise ValueError(f"more than {MAX_FULL_TIDDLERS} full tiddlers in one request")
+    total = sum(len(t.text) for t in fulls)
     if total > MAX_TOTAL_CHARS:
         raise ValueError(f"total tiddler text exceeds {MAX_TOTAL_CHARS} chars")
 
@@ -145,7 +158,7 @@ def _check_total_budget(tiddlers: list[ClientTiddler]) -> None:
 class ClientAskBody(BaseModel):
     question: str
     tiddlers: list[ClientTiddler] = Field(
-        default_factory=list, max_length=MAX_CLIENT_TIDDLERS
+        default_factory=list, max_length=MAX_CANDIDATE_TIDDLERS
     )
     # Bounds embedding-cache *misses* per request (cost control), not the
     # candidate pool — every sent note participates in ranking once cached.
@@ -161,14 +174,14 @@ class ClientAskBody(BaseModel):
 
     @model_validator(mode="after")
     def _budget(self):
-        _check_total_budget(self.tiddlers)
+        _check_content_budget(self.tiddlers)
         return self
 
 
 class ClientRelatedBody(BaseModel):
     target: ClientTiddler
     tiddlers: list[ClientTiddler] = Field(
-        default_factory=list, max_length=MAX_CLIENT_TIDDLERS
+        default_factory=list, max_length=MAX_CANDIDATE_TIDDLERS
     )
     k: int = Field(5, ge=1, le=50)
     max_tiddlers: int = Field(100, ge=1, le=1000)
@@ -177,21 +190,21 @@ class ClientRelatedBody(BaseModel):
     def _budget(self):
         if self.target.title is None:
             raise ValueError("target must be a full tiddler, not a hash ref")
-        _check_total_budget(self.tiddlers)
+        _check_content_budget(self.tiddlers)
         return self
 
 
 class ClientSearchBody(BaseModel):
     query: str = Field(min_length=1)
     tiddlers: list[ClientTiddler] = Field(
-        default_factory=list, max_length=MAX_CLIENT_TIDDLERS
+        default_factory=list, max_length=MAX_CANDIDATE_TIDDLERS
     )
     k: int = Field(10, ge=1, le=50)
     max_tiddlers: int = Field(100, ge=1, le=1000)
 
     @model_validator(mode="after")
     def _budget(self):
-        _check_total_budget(self.tiddlers)
+        _check_content_budget(self.tiddlers)
         return self
 
 
@@ -220,14 +233,14 @@ class NotesSyncBody(BaseModel):
     nothing to store). Same budgets as the ask routes."""
 
     tiddlers: list[ClientTiddler] = Field(
-        default_factory=list, max_length=MAX_CLIENT_TIDDLERS
+        default_factory=list, max_length=MAX_FULL_TIDDLERS
     )
 
     @model_validator(mode="after")
     def _fulls_within_budget(self):
         if any(t.title is None for t in self.tiddlers):
             raise ValueError("sync accepts full tiddlers only, not hash refs")
-        _check_total_budget(self.tiddlers)
+        _check_content_budget(self.tiddlers)
         return self
 
 

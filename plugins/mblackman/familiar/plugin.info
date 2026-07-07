@@ -3,7 +3,7 @@
     "name": "familiar",
     "description": "Familiar — an AI familiar for your wiki: streaming chat, semantic search, summaries, tag/task suggestions, and related notes.",
     "author": "mblackman",
-    "version": "0.17.0",
+    "version": "0.18.0",
     "core-version": ">=5.3.0",
     "source": "https://github.com/mblackman/tiddly-familiar",
     "documentation": "$:/plugins/mblackman/familiar/Readme",

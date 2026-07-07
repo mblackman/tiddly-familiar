@@ -375,12 +375,20 @@ def test_client_related_ref_target_is_422(client):
 
 
 def test_client_ask_caps(client, monkeypatch):
-    over_count = [
+    # Too many *full* (content-bearing) tiddlers: rejected.
+    over_full = [
         {"title": f"T{i}", "text": "", "fields": {}}
-        for i in range(main.MAX_CLIENT_TIDDLERS + 1)
+        for i in range(main.MAX_FULL_TIDDLERS + 1)
     ]
-    resp = client.post("/ask", json={"question": "q", "tiddlers": over_count}, headers=AUTH)
+    resp = client.post("/ask", json={"question": "q", "tiddlers": over_full}, headers=AUTH)
     assert resp.status_code == 422
+
+    # A large candidate set of bare {hash} refs is cheap and accepted (past the
+    # old 500 full-tiddler cap): it clears validation and only trips the note
+    # cache (409 for unknown hashes), never a 422.
+    many_refs = [{"hash": f"{i:064x}"} for i in range(main.MAX_FULL_TIDDLERS + 50)]
+    resp = client.post("/ask", json={"question": "q", "tiddlers": many_refs}, headers=AUTH)
+    assert resp.status_code == 409
 
     # Total-text budget: a few tiddlers under the per-tiddler cap but over 2M.
     big = [
