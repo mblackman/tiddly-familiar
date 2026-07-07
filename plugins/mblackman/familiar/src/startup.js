@@ -92,7 +92,7 @@ exports.startup = function() {
     var SAVED_CHAT_PREFIX = "$:/familiar/chat/";
     var SEARCH_RESULT_PREFIX = "$:/temp/familiar/search/result/";
     var CHAT_NOTE_STATE = "$:/state/familiar/chat-note";
-    var NEW_TITLE_STATE = "$:/state/familiar/new-chat-title";
+    var NEW_TITLE_STATE = "$:/temp/volatile/familiar/new-chat-title";
     var NEW_NOTE_OPEN_STATE = "$:/state/familiar/new-note-open";
     var TITLE_TEMPLATE_DEFAULT = "AI Chat: {name}";
     var CHAT_TAG = "ai-chat";
@@ -1062,8 +1062,8 @@ exports.startup = function() {
 
     $tw.rootWidget.addEventListener("tm-ask-ai", function() {
       if (($tw.wiki.getTiddlerText("$:/state/familiar/asking") || "") === "yes") return;
-      var question = ($tw.wiki.getTiddlerText("$:/state/familiar/question") || "").trim();
-      var filter   = ($tw.wiki.getTiddlerText("$:/state/familiar/filter")   || "").trim();
+      var question = ($tw.wiki.getTiddlerText("$:/temp/volatile/familiar/question") || "").trim();
+      var filter   = ($tw.wiki.getTiddlerText("$:/temp/volatile/familiar/filter")   || "").trim();
       dbg("tm-ask-ai fired; question=" + JSON.stringify(question) + " filter=" + JSON.stringify(filter));
       if (!question) {
         setState("$:/state/familiar/answer", "//Type a question first.//");
@@ -1071,7 +1071,7 @@ exports.startup = function() {
       }
       var history = chatHistory();
       appendTurn("user", question);
-      setState("$:/state/familiar/question", "");
+      setState("$:/temp/volatile/familiar/question", "");
       setState("$:/state/familiar/asking",  "yes");
       setState("$:/state/familiar/answer",  "", "text/markdown");
       setState("$:/state/familiar/sources", "");
@@ -1099,7 +1099,7 @@ exports.startup = function() {
     $tw.rootWidget.addEventListener("tm-ask-ai-note", function(event) {
       var note = event.param || "";
       if (!note || !$tw.wiki.tiddlerExists(note)) return;
-      var qState      = "$:/state/familiar/note-question/" + note;
+      var qState      = "$:/temp/volatile/familiar/note-question/" + note;
       var askingState = "$:/state/familiar/note-asking/" + note;
       var answerState = "$:/state/familiar/note-answer/" + note;
       if (($tw.wiki.getTiddlerText(askingState) || "") === "yes") return;
@@ -1343,8 +1343,8 @@ exports.startup = function() {
     // decides which message the send button fires.
     $tw.rootWidget.addEventListener("tm-familiar-search", function() {
       if (($tw.wiki.getTiddlerText("$:/state/familiar/searching") || "") === "yes") return;
-      var query  = ($tw.wiki.getTiddlerText("$:/state/familiar/question") || "").trim();
-      var filter = ($tw.wiki.getTiddlerText("$:/state/familiar/filter")   || "").trim();
+      var query  = ($tw.wiki.getTiddlerText("$:/temp/volatile/familiar/question") || "").trim();
+      var filter = ($tw.wiki.getTiddlerText("$:/temp/volatile/familiar/filter")   || "").trim();
       dbg("tm-familiar-search fired; query=" + JSON.stringify(query) + " filter=" + JSON.stringify(filter));
       if (!query) {
         setState("$:/state/familiar/search-results", "//Type something to search for.//");

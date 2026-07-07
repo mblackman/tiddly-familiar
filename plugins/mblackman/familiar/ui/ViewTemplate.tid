@@ -1,6 +1,6 @@
 <$list filter="[all[current]!has[draft.of]tag[ai-chat]]" variable="ignore-chat-note">
 <$vars turnPrefix={{{ [[$:/familiar/chat/]addsuffix<currentTiddler>addsuffix[/turn/]] }}}
-       noteQState={{{ [[$:/state/familiar/note-question/]addsuffix<currentTiddler>] }}}
+       noteQState={{{ [[$:/temp/volatile/familiar/note-question/]addsuffix<currentTiddler>] }}}
        noteAskingState={{{ [[$:/state/familiar/note-asking/]addsuffix<currentTiddler>] }}}
        noteAnswerState={{{ [[$:/state/familiar/note-answer/]addsuffix<currentTiddler>] }}}>
 <div class="fam-chat fam-chat-note">

@@ -77,7 +77,7 @@ async def main():
         requests.clear()
         await page.evaluate(
             "() => { $tw.wiki.addTiddler(new $tw.Tiddler("
-            "{title: '$:/state/familiar/question', text: 'ping?'}));"
+            "{title: '$:/temp/volatile/familiar/question', text: 'ping?'}));"
             "$tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'}); }"
         )
         for _ in range(20):

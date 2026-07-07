@@ -148,7 +148,7 @@ async def main():
             f"steady-state ask still preflights /notes/check: {check_requests}"
 
         # --- streaming ask over locally-collected notes ---
-        await set_tiddler(page, "$:/state/familiar/question",
+        await set_tiddler(page, "$:/temp/volatile/familiar/question",
                           "Using Zebra Facts, explain in detail (several sentences) "
                           "what is unique about each zebra and where zebras live.")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
@@ -182,7 +182,7 @@ async def main():
             f"ask after edit still preflights /notes/check: {check_requests}"
 
         # --- follow-up uses history ---
-        await set_tiddler(page, "$:/state/familiar/question",
+        await set_tiddler(page, "$:/temp/volatile/familiar/question",
                           "Where does that second animal live?")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
         await wait_done(page)

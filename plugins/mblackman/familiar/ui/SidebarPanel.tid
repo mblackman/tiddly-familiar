@@ -1,4 +1,4 @@
-\define fam-clear-chat()
+\procedure fam-clear-chat()
 <$action-deletetiddler $filter="[prefix[$:/temp/familiar/chat/]]"/>
 <$action-setfield $tiddler="$:/state/familiar/chat-note" text=""/>
 <$action-setfield $tiddler="$:/state/familiar/answer" text=""/>
@@ -6,8 +6,8 @@
 <$action-setfield $tiddler="$:/state/familiar/sources-open" text="no"/>
 \end
 
-\define fam-transcript(prefix)
-<$list filter="[prefix[$prefix$]sort[title]]" variable="turn">
+\procedure fam-transcript(prefix)
+<$list filter="[prefix<prefix>sort[title]]" variable="turn">
 <$vars turnClass={{{ [<turn>get[role]match[user]then[fam-turn fam-turn-user]else[fam-turn fam-turn-ai]] }}}>
 <div class=<<turnClass>>>
 <$transclude tiddler=<<turn>> mode="block"/>
@@ -61,7 +61,7 @@ New chat
 <$reveal state="$:/state/familiar/new-note-open" type="match" text="yes" tag="div">
 <div class="fam-newnote-row">
 <$keyboard key="enter" class="fam-newnote-input" actions="""<$action-sendmessage $message="tm-new-chat-note"/>""">
-<$edit-text tiddler="$:/state/familiar/new-chat-title" tag="input" placeholder="Note title…"/>
+<$edit-text tiddler="$:/temp/volatile/familiar/new-chat-title" tag="input" placeholder="Note title…"/>
 </$keyboard>
 <$button class="fam-preset" tooltip="Roll another name">
 <$action-sendmessage $message="tm-new-chat-title"/>
@@ -115,7 +115,7 @@ Create
 </$reveal>
 <$reveal state="$:/state/familiar/chat-note" type="nomatch" text="" tag="div">
 <div class="fam-chat">
-<$macrocall $name="fam-transcript" prefix={{{ [[$:/familiar/chat/]addsuffix{$:/state/familiar/chat-note}addsuffix[/turn/]] }}}/>
+<$transclude $variable="fam-transcript" prefix={{{ [[$:/familiar/chat/]addsuffix{$:/state/familiar/chat-note}addsuffix[/turn/]] }}}/>
 </div>
 </$reveal>
 
@@ -171,19 +171,19 @@ Search
 
 <$reveal state="$:/state/familiar/filter-open" type="match" text="yes" tag="div">
 <div class="fam-filter-row">
-<$edit-text tiddler="$:/state/familiar/filter" tag="input" placeholder="[!is[system]]"/>
+<$edit-text tiddler="$:/temp/volatile/familiar/filter" tag="input" placeholder="[!is[system]]"/>
 <div class="fam-presets">
 <$button class="fam-preset" tooltip="Search every note (clears the filter)">
-<$action-setfield $tiddler="$:/state/familiar/filter" text=""/>
+<$action-setfield $tiddler="$:/temp/volatile/familiar/filter" text=""/>
 everything
 </$button>
 <$button class="fam-preset" tooltip="Only the note currently open in the story">
-<$action-setfield $tiddler="$:/state/familiar/filter" text={{{ [{$:/HistoryList!!current-tiddler}format:titlelist[]] }}}/>
+<$action-setfield $tiddler="$:/temp/volatile/familiar/filter" text={{{ [{$:/HistoryList!!current-tiddler}format:titlelist[]] }}}/>
 this note
 </$button>
 <$button class="fam-preset" tooltip="Notes sharing the open note's first tag">
 <$vars lb="[tag[" rb="]]">
-<$action-setfield $tiddler="$:/state/familiar/filter" text={{{ [{$:/HistoryList!!current-tiddler}get[tags]enlist-input[]first[]addprefix<lb>addsuffix<rb>] }}}/>
+<$action-setfield $tiddler="$:/temp/volatile/familiar/filter" text={{{ [{$:/HistoryList!!current-tiddler}get[tags]enlist-input[]first[]addprefix<lb>addsuffix<rb>] }}}/>
 </$vars>
 its tag
 </$button>
@@ -193,14 +193,14 @@ its tag
 
 <$vars sendMsg={{{ [{$:/state/familiar/mode}match[search]then[tm-familiar-search]else[tm-ask-ai]] }}} busyState={{{ [{$:/state/familiar/mode}match[search]then[$:/state/familiar/searching]else[$:/state/familiar/asking]] }}} placeholder={{{ [{$:/state/familiar/mode}match[search]then[Search your notes…]else[Ask your notes…]] }}}>
 <div class="fam-composer-row">
-<$vars filterBtnClass={{{ [{$:/state/familiar/filter}!match[]then[tc-btn-invisible fam-filter-toggle fam-filter-active]else[tc-btn-invisible fam-filter-toggle]] }}}>
+<$vars filterBtnClass={{{ [{$:/temp/volatile/familiar/filter}!match[]then[tc-btn-invisible fam-filter-toggle fam-filter-active]else[tc-btn-invisible fam-filter-toggle]] }}}>
 <$button class=<<filterBtnClass>> tooltip="Limit which notes are searched">
 <$action-setfield $tiddler="$:/state/familiar/filter-open" text={{{ [{$:/state/familiar/filter-open}match[yes]then[no]else[yes]] }}}/>
 <svg class="fam-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5h18l-7 8v5l-4 2v-7L3 5z"/></svg>
 </$button>
 </$vars>
 <$keyboard key="enter" class="fam-input-wrap" actions="""<$action-sendmessage $message=<<sendMsg>>/>""">
-<$edit-text tiddler="$:/state/familiar/question" tag="textarea" rows="1" autoHeight="yes" minHeight="0px" placeholder=<<placeholder>> class="fam-input"/>
+<$edit-text tiddler="$:/temp/volatile/familiar/question" tag="textarea" rows="1" autoHeight="yes" minHeight="0px" placeholder=<<placeholder>> class="fam-input"/>
 </$keyboard>
 <$reveal state=<<busyState>> type="nomatch" text="yes" tag="span">
 <$button class="fam-send" tooltip="Send (Enter)">

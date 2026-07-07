@@ -68,16 +68,16 @@ async def main():
         # --- new chat note: templated title + reroll + create ---
         tpl_cfg = "$:/config/mblackman/familiar/ChatNoteTemplate"
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-title'})")
-        title1 = await get_text(page, "$:/state/familiar/new-chat-title")
+        title1 = await get_text(page, "$:/temp/volatile/familiar/new-chat-title")
         print("proposed title (default template):", repr(title1))
         assert title1.startswith("AI Chat: "), "default template not applied"
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-title'})")
-        title2 = await get_text(page, "$:/state/familiar/new-chat-title")
+        title2 = await get_text(page, "$:/temp/volatile/familiar/new-chat-title")
         print("rerolled title:", repr(title2))
         assert title2.startswith("AI Chat: "), "reroll broke the template"
         await set_tiddler(page, tpl_cfg, "Chat {date} {name}")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-title'})")
-        title3 = await get_text(page, "$:/state/familiar/new-chat-title")
+        title3 = await get_text(page, "$:/temp/volatile/familiar/new-chat-title")
         print("custom-template title:", repr(title3))
         assert title3.startswith("Chat 2"), f"custom template not applied: {title3!r}"
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-note'})")
@@ -90,12 +90,12 @@ async def main():
             new_note,
         )
         assert note_fields and "ai-chat" in note_fields["tags"], "new note missing ai-chat tag"
-        assert await get_text(page, "$:/state/familiar/new-chat-title") == "", \
+        assert await get_text(page, "$:/temp/volatile/familiar/new-chat-title") == "", \
             "proposed title not cleared after create"
         story = await page.evaluate("() => $tw.wiki.getTiddlerList('$:/StoryList')")
         assert new_note in story, "new note not opened in the story"
         # user-typed titles get sanitized of filter-breaking chars
-        await set_tiddler(page, "$:/state/familiar/new-chat-title", "My [weird] {chat}")
+        await set_tiddler(page, "$:/temp/volatile/familiar/new-chat-title", "My [weird] {chat}")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-new-chat-note'})")
         weird_note = await get_text(page, "$:/state/familiar/chat-note")
         print("sanitized note title:", repr(weird_note))
@@ -130,7 +130,7 @@ async def main():
         print("new-chat-note flow OK")
 
         # --- streaming ask ---
-        await set_tiddler(page, "$:/state/familiar/question", "What is Caddy used for?")
+        await set_tiddler(page, "$:/temp/volatile/familiar/question", "What is Caddy used for?")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
         growth = []
         for _ in range(120):
@@ -152,7 +152,7 @@ async def main():
         assert len(growth) >= 2, "answer state never grew incrementally — streaming broken?"
 
         # --- follow-up uses history ---
-        await set_tiddler(page, "$:/state/familiar/question", "Which port does it listen on?")
+        await set_tiddler(page, "$:/temp/volatile/familiar/question", "Which port does it listen on?")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
         for _ in range(120):
             await asyncio.sleep(0.5)
@@ -218,7 +218,7 @@ async def main():
         assert retrievable, "digested chat note should be a retrieval candidate"
 
         # --- next turn lands in the note while bound ---
-        await set_tiddler(page, "$:/state/familiar/question", "Summarize that in one sentence.")
+        await set_tiddler(page, "$:/temp/volatile/familiar/question", "Summarize that in one sentence.")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai'})")
         for _ in range(120):
             await asyncio.sleep(0.5)
@@ -251,7 +251,7 @@ async def main():
         print("resume re-bound the panel to the note")
 
         # --- in-note composer: ask directly from the chat note ---
-        await set_tiddler(page, "$:/state/familiar/note-question/" + note, "And what is AdGuard for?")
+        await set_tiddler(page, "$:/temp/volatile/familiar/note-question/" + note, "And what is AdGuard for?")
         await page.evaluate(
             "(n) => $tw.rootWidget.dispatchEvent({type: 'tm-ask-ai-note', param: n})", note
         )
@@ -267,7 +267,7 @@ async def main():
         print("roles after in-note ask:", in_note)
         assert len(in_note) == 8 and in_note[-2:] == ["user", "assistant"], \
             f"in-note ask did not append turns: {in_note}"
-        assert await get_text(page, "$:/state/familiar/note-question/" + note) == "", \
+        assert await get_text(page, "$:/temp/volatile/familiar/note-question/" + note) == "", \
             "in-note question not cleared after send"
 
         # Remove the (real, synced) chat note + turns so reruns start clean.

@@ -78,7 +78,7 @@ async def main():
 
         # --- UI flow: mode toggle → composer → tm-familiar-search → results ---
         await set_tiddler(page, "$:/state/familiar/mode", "search")
-        await set_tiddler(page, "$:/state/familiar/question", "reverse proxy https certificates")
+        await set_tiddler(page, "$:/temp/volatile/familiar/question", "reverse proxy https certificates")
         await page.evaluate("() => $tw.rootWidget.dispatchEvent({type: 'tm-familiar-search'})")
         results = []
         for _ in range(120):
