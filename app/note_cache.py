@@ -74,6 +74,13 @@ class NoteCache:
     def close(self) -> None:
         self._db.close()
 
+    def count(self) -> int:
+        """Total notes currently held (across all clients/hashes). A rough
+        server-side coverage gauge for the plugin's sync-status panel — it
+        counts distinct content hashes, so an edited note briefly double-counts
+        (old + new) until the old hash ages out via the TTL."""
+        return self._db.execute("SELECT COUNT(*) FROM notes").fetchone()[0]
+
     def check(self, hashes: list[str]) -> set[str]:
         """Return the subset of `hashes` present, bumping their last_seen."""
         present: set[str] = set()

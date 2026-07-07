@@ -178,6 +178,19 @@ def test_notes_sync_stores_for_later_hash_refs(client, monkeypatch):
     assert ask.json()["cache"] == {"hits": 1, "misses": 0}
 
 
+def test_notes_stats_reports_cache_count(client):
+    """The sync-status panel reads /notes/stats for the server's own count."""
+    assert client.post("/notes/stats").status_code == 405  # GET only
+    assert client.get("/notes/stats").status_code == 403  # auth required
+
+    empty = client.get("/notes/stats", headers=AUTH)
+    assert empty.status_code == 200
+    assert empty.json() == {"count": 0}
+
+    client.post("/notes/sync", json={"tiddlers": [ZEBRA]}, headers=AUTH)
+    assert client.get("/notes/stats", headers=AUTH).json() == {"count": 1}
+
+
 def test_notes_sync_rejects_hash_refs(client):
     resp = client.post(
         "/notes/sync", json={"tiddlers": [{"hash": "f" * 64}]}, headers=AUTH

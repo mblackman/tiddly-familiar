@@ -488,6 +488,39 @@ exports.startup = function() {
       }, 2000);
     }
 
+    // --- sync status readout ---
+    // $:/temp/familiar/sync-status carries the coarse state in `text`
+    // (scanning|syncing|ready|degraded) plus count fields the settings panel
+    // renders so a user can see coverage and spot gaps. `server` is the
+    // gateway's own note count (via /notes/stats), left blank until fetched.
+    var serverCount = null; // last known server-held note count; null = unknown
+    function setSyncState(state) {
+      var total = 0, synced = 0;
+      for (var t in syncState) { total++; if (syncState[t].synced) synced++; }
+      var fields = {
+        title: SYNC_STATUS,
+        text: state,
+        total: String(total),
+        synced: String(synced),
+        unsynced: String(total - synced),
+        pending: String(Object.keys(pendingPush).length),
+        checked: $tw.utils.stringifyDate(new Date())
+      };
+      if (serverCount !== null) fields.server = String(serverCount);
+      $tw.wiki.addTiddler(new $tw.Tiddler(fields));
+    }
+
+    // Ask the gateway how many notes it holds and fold the number into the
+    // status tiddler. Best-effort: a failure leaves the last known count.
+    function refreshServerCount() {
+      return fetch(baseURL() + "/notes/stats", {headers: headers()})
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          if (d && typeof d.count === "number") serverCount = d.count;
+        })
+        .catch(function() {});
+    }
+
     // POST hashes to /notes/check in <=SYNC_CHECK_BATCH chunks — a wiki with
     // thousands of notes would 422 a single request (server cap 2000) and, with
     // no retry, wedge sync in "degraded" forever. Resolves to a {hash:true} set
@@ -561,7 +594,9 @@ exports.startup = function() {
     function flushPending(attempt) {
       var titles = Object.keys(pendingPush);
       if (!titles.length) return;
-      pushTitles(titles).catch(function(err) {
+      pushTitles(titles).then(function() {
+        setSyncState($tw.wiki.getTiddlerText(SYNC_STATUS) || "ready");
+      }).catch(function(err) {
         if (attempt + 1 >= SYNC_RETRY_MAX) {
           dbg("background push failed after retries (" + err.message +
               ") - will retry on next edit; asks still work");
@@ -604,7 +639,7 @@ exports.startup = function() {
     // After this, steady-state asks are pure hash refs with no preflight and
     // no hashing.
     function startInitialScan() {
-      setState(SYNC_STATUS, "scanning");
+      setSyncState("scanning");
       var persisted = loadPersistedSync();
       var titles = $tw.wiki.filterTiddlers("[!is[system]]");
       var i = 0, reused = 0;
@@ -643,7 +678,7 @@ exports.startup = function() {
     // until a manual reload. Success flips status to "ready" inside warmServer.
     function warmServerWithRetry(attempt) {
       warmServer().catch(function(err) {
-        setState(SYNC_STATUS, "degraded");
+        setSyncState("degraded");
         if (attempt + 1 >= SYNC_RETRY_MAX) {
           dbg("sync warm failed after retries (" + err.message +
               ") - asks degrade to full sends");
@@ -667,11 +702,31 @@ exports.startup = function() {
           });
           return pushTitles(toPush).then(function() {
             schedulePersist();
-            setState(SYNC_STATUS, "ready");
-            dbg("sync warm done - " + titles.length + " note(s) tracked, " +
-                toPush.length + " pushed");
+            return refreshServerCount().then(function() {
+              setSyncState("ready");
+              dbg("sync warm done - " + titles.length + " note(s) tracked, " +
+                  toPush.length + " pushed");
+            });
           });
         });
+    }
+
+    // Manual full sync (the settings "Sync now" button): pick up any notes the
+    // idle scan / change events missed, re-check everything unsynced against
+    // the gateway, push what it lacks, and refresh the server count. Runs the
+    // same warmServer path as startup, so it's safe to invoke any time. A
+    // second click while "syncing" is a no-op (guarded by the handler).
+    function syncNow() {
+      setSyncState("syncing");
+      $tw.wiki.filterTiddlers("[!is[system]]").forEach(function(title) {
+        if (syncState[title]) return; // already tracked
+        var n = readNote(title);
+        if (n) syncState[title] = {hash: n.hash, synced: false, modified: n.modified};
+      });
+      return warmServer().catch(function(err) {
+        setSyncState("degraded");
+        throw err;
+      });
     }
 
     // Build the ask payload from the sync map: refs for server-confirmed
@@ -931,7 +986,9 @@ exports.startup = function() {
             return r.json().then(function(data) { return annotateLocal(data, p); });
           });
         });
-      }
+      },
+      // Force a full corpus sync + status refresh (settings "Sync now" button).
+      syncNow: syncNow
     };
 
     function askErrorMessage(err) {
@@ -1325,6 +1382,16 @@ exports.startup = function() {
         setState("$:/state/familiar/search-results", "//" + askErrorMessage(err) + "//");
         setState("$:/state/familiar/searching", "");
         dbg("search FAILED (" + (err.status || "network") + "): " + err.message);
+      });
+    });
+
+    // Settings "Sync now": force a full sync. Ignored while one is running so a
+    // double-click can't launch overlapping warms.
+    $tw.rootWidget.addEventListener("tm-familiar-sync", function() {
+      if (($tw.wiki.getTiddlerText(SYNC_STATUS) || "") === "syncing") return;
+      dbg("manual sync requested");
+      syncNow().catch(function(err) {
+        dbg("manual sync failed (" + err.message + ") - asks degrade to full sends");
       });
     });
 

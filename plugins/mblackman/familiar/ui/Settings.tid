@@ -57,3 +57,30 @@ How many results the sidebar semantic search returns:
 How many related notes the ''Related'' tool suggests per note:
 
 <$edit-text tiddler="$:/config/mblackman/familiar/RelatedCount" tag="input" type="number" default="" placeholder="default (5)" class="fam-settings-input"/>
+
+---
+
+!! Sync status
+
+The plugin keeps the gateway's note cache warm in the background so answers can draw on your whole wiki. Check coverage here — if ''awaiting sync'' stays high or ''server holds'' is far below ''notes tracked'', some notes aren't reaching the server yet. Use ''Sync now'' to force a full pass.
+
+<table class="fam-sync-status">
+<tr><td>State</td><td><$text text={{{ [{$:/temp/familiar/sync-status}match[ready]then[In sync]] ~[{$:/temp/familiar/sync-status}match[syncing]then[Syncing…]] ~[{$:/temp/familiar/sync-status}match[scanning]then[Scanning wiki…]] ~[{$:/temp/familiar/sync-status}match[degraded]then[Gateway unreachable — asks still work, sync will retry]] ~[Not started] }}}/></td></tr>
+<tr><td>Notes tracked (this wiki)</td><td><$text text={{{ [{$:/temp/familiar/sync-status!!total}else[—]] }}}/></td></tr>
+<tr><td>Confirmed on server</td><td><$text text={{{ [{$:/temp/familiar/sync-status!!synced}else[—]] }}}/></td></tr>
+<tr><td>Awaiting sync</td><td><$text text={{{ [{$:/temp/familiar/sync-status!!unsynced}else[—]] }}}/></td></tr>
+<tr><td>Server holds (all cached notes)</td><td><$text text={{{ [{$:/temp/familiar/sync-status!!server}else[—]] }}}/></td></tr>
+<tr><td>Last checked</td><td><$view tiddler="$:/temp/familiar/sync-status" field="checked" format="date" template="YYYY-0MM-0DD 0hh:0mm"><span>—</span></$view></td></tr>
+</table>
+
+<$reveal state="$:/temp/familiar/sync-status" type="match" text="syncing" tag="span">
+<$button class="fam-settings-input" disabled="yes">Syncing…</$button>
+</$reveal>
+<$reveal state="$:/temp/familiar/sync-status" type="nomatch" text="syncing" tag="span">
+<$button class="fam-settings-input">
+<$action-sendmessage $message="tm-familiar-sync"/>
+Sync now
+</$button>
+</$reveal>
+
+//"Server holds" counts every distinct note version the gateway has cached (shared across wikis, edited notes linger until the 30-day cache TTL), so it can read a little higher than this wiki's note count.//

@@ -292,6 +292,14 @@ async def notes_check(body: NotesCheckBody):
     return {"missing": [h for h in body.hashes if h not in present]}
 
 
+@app.get("/notes/stats", dependencies=[Depends(require_auth)])
+async def notes_stats():
+    """How many notes the server currently holds — the plugin's sync-status
+    panel shows this next to its own tracked/synced counts so a coverage gap is
+    visible at a glance."""
+    return {"count": _note_cache.count()}
+
+
 @app.post("/notes/sync", dependencies=[Depends(require_auth)])
 async def notes_sync(body: NotesSyncBody):
     """Background sync from the plugin: store full tiddlers now, embed them
